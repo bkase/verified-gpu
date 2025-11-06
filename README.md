@@ -145,17 +145,17 @@ $$
 $$
 
 $$
-\frac{\ }{\Gamma \vdash \texttt{for\_offsets}\;[] \triangleright \varepsilon}\quad(\textsc{T-ForOffsets-}\varnothing)
+\frac{\ }{\Gamma \vdash \texttt{for\\_offsets}\;[] \triangleright \varepsilon}\quad(\textsc{T-ForOffsets-}\varnothing)
 $$
 
 $$
-\frac{\Gamma \vdash s \triangleright g_1 \quad \Gamma \vdash \texttt{for\_offsets}\;ks \triangleright g_2}{\Gamma \vdash \texttt{for\_offsets}\;((k,s)::ks) \triangleright g_1 \odot g_2}\quad(\textsc{T-ForOffsets-Cons})
+\frac{\Gamma \vdash s \triangleright g_1 \quad \Gamma \vdash \texttt{for\\_offsets}\;ks \triangleright g_2}{\Gamma \vdash \texttt{for\\_offsets}\;((k,s)::ks) \triangleright g_1 \odot g_2}\quad(\textsc{T-ForOffsets-Cons})
 $$
 
 **Parallel threads (crux)**
 
 $$
-\frac{\Gamma \vdash body \triangleright g \quad \forall p \in \mathrm{phases}(g),\;\mathrm{WritesDisjointPhase}(p) \wedge \mathrm{NoRAWIntraPhase}(p)}{\Gamma \vdash \texttt{for\_threads}\ \{body\} \triangleright g}\quad(\textsc{T-ForThreads})
+\frac{\Gamma \vdash body \triangleright g \quad \forall p \in \mathrm{phases}(g),\;\mathrm{WritesDisjointPhase}(p) \wedge \mathrm{NoRAWIntraPhase}(p)}{\Gamma \vdash \texttt{for\\_threads}\ \{body\} \triangleright g}\quad(\textsc{T-ForThreads})
 $$
 
 - `phases(g)` is `Grade.phases g` (exposed in Lean for the side-condition)
