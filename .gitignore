@@ -1,0 +1,4 @@
+.lake/
+.devenv/
+.direnv/
+.devenv.flake.nix
