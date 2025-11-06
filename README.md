@@ -46,6 +46,9 @@ direnv allow     # or: nix develop  /  devenv shell
 # ensure toolchain
 elan toolchain install $(cat lean-toolchain)
 lake build
+# default target only checks `LanguageQuantale`; build everything you care about explicitly
+lake build Kernel    # includes Kernel/Syntax, Typing, Lemmas (e.g. affine facts)
+lake build Tests     # sample programs / grade synthesis smoke tests
 ```
 
 Repo layout:
@@ -56,6 +59,8 @@ Effects.lean            -- GPU phase alphabet, Grade ops, denotation & safety pr
 Kernel/                 -- Core WGSL-like IR & typing judgment
   Syntax.lean           -- Expressions, locations, statements
   Typing.lean           -- Graded typing rules + synthesizer (`gradeOf`)
+  Lemmas/               -- Reusable arithmetic and guard reasoning facts
+    Affine.lean         -- Affine index lemmas for Blelloch-style scans
 Tests/                  -- Quick grade synthesis checks
   GradeEval.lean        -- End-to-end sample touching every statement form
 lakefile.lean           -- Lake config (packages & targets)
@@ -188,6 +193,8 @@ All accesses in `g` inherit the guard (`tid % step = phase`). Critical for disch
 Keeps the body’s grade `g` but **requires** the side-condition `(∀ p ∈ Grade.phases g, WritesDisjointPhase p ∧ NoRAWIntraPhase p)`. Cross-phase hazards remain allowed because barriers split the word into distinct phases.
 
 > In code, these obligations are proved by arithmetic over `Aff2` indices and guard predicates (e.g. Blelloch upsweep: `tid % (2·off)=0` and writes `buf[tid + 2·off − 1]` are pairwise distinct).
+
+Reusable arithmetic lemmas for these obligations live in `Kernel/Lemmas/Affine.lean`. They cover constant shifts on `Int`, lifting `Nat` disequality to `Int`, and the injectivity facts needed for the upsweep/downsweep indices.
 
 ---
 
