@@ -81,9 +81,10 @@ devenv.nix              -- Nix dev shell (elan, git, node)
 
 Our typing judgment (to be introduced in `Kernel/Typing.lean`) has the shape
 
-[
-\Gamma ;\vdash; s ;\triangleright; g
-]
+
+$$
+\Gamma \vdash s \triangleright g
+$$
 
 > _Read_: “In environment Γ, statement `s` synthesizes grade `g` (its phase trace).”
 
