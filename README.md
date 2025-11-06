@@ -53,6 +53,11 @@ Repo layout:
 ```
 LanguageQuantale.lean   -- Words & languages; quantale instances
 Effects.lean            -- GPU phase alphabet, Grade ops, denotation & safety preds
+Kernel/                 -- Core WGSL-like IR & typing judgment
+  Syntax.lean           -- Expressions, locations, statements
+  Typing.lean           -- Graded typing rules + synthesizer (`gradeOf`)
+Tests/                  -- Quick grade synthesis checks
+  GradeEval.lean        -- End-to-end sample touching every statement form
 lakefile.lean           -- Lake config (packages & targets)
 lean-toolchain          -- Lean toolchain pin
 devenv.nix              -- Nix dev shell (elan, git, node)

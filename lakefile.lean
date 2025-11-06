@@ -11,3 +11,8 @@ require mathlib from git
 lean_lib LanguageQuantale
 
 lean_lib Effects
+
+lean_lib Kernel
+
+lean_lib Tests where
+  roots := #[`Tests.GradeEval]
