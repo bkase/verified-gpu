@@ -93,13 +93,11 @@ Grades compose with `⊙` (sequence), and barriers are explicit phase cuts. Guar
 
 Abbreviations:
 
-- `ε` = empty grade
-- `g ⊙ h` = sequential composition of grades
-- `B_wg(g)` / `B_st(g)` = append a **workgroup/storage** phase boundary
-- `R_s(loc,guard)` / `W_s(loc,guard)` = singleton read/write footprint in space `s ∈ {wg, st}`
+- `ε` = empty grade (`Grade.eps`)
+- `g ⊙ h` = sequential composition (`Grade.seq g h`)
+- `B(g)` = append a phase boundary (`g ⊙ Grade.ofBarrier`)
+- `R(loc)` / `W(loc)` = singleton read/write footprints from `loc`
 - `stamp(g,guard)` = attach `guard` to all accesses in `g`
-- `⊔` = finite join of grades (branching)
-- `Fold(⊙, ε, {g_i})` = left fold (sequential) of a finite family
 
 **Basic constructs**
 
@@ -114,20 +112,14 @@ Abbreviations:
 **Memory effects**
 
 ```
-──────────────────────────────────────────────────────── (T-Load-wg)
-Γ ⊢ load(loc_wg, x) ▷ R_wg(loc_wg, guard_default)
+───────────────────────────────────────────          (T-Load)
+Γ ⊢ load loc dst ▷ R(loc)
 
-──────────────────────────────────────────────────────── (T-Load-st)
-Γ ⊢ load(loc_st, x) ▷ R_st(loc_st, guard_default)
-
-──────────────────────────────────────────────────────── (T-Store-wg)
-Γ ⊢ store(loc_wg, e) ▷ W_wg(loc_wg, guard_default)
-
-──────────────────────────────────────────────────────── (T-Store-st)
-Γ ⊢ store(loc_st, e) ▷ W_st(loc_st, guard_default)
+───────────────────────────────────────────          (T-Store)
+Γ ⊢ store loc rhs ▷ W(loc)
 
 ───────────────────────────────                         (T-Atomic)
-Γ ⊢ atomicAdd(loc, e, x) ▷ ε     [treated race-safe by device semantics]
+Γ ⊢ atomicAdd loc rhs dst ▷ ε     [treated race-safe by device semantics]
 ```
 
 **Composition and barriers**
@@ -138,64 +130,59 @@ Abbreviations:
 Γ ⊢ s ; t ▷ g ⊙ h
 
 ───────────────────────────────                         (T-Barrier-WG)
-Γ ⊢ workgroupBarrier ▷ B_wg(ε)
+Γ ⊢ workgroupBarrier ▷ B(ε)
 
 ───────────────────────────────                         (T-Barrier-ST)
-Γ ⊢ storageBarrier   ▷ B_st(ε)
+Γ ⊢ storageBarrier   ▷ B(ε)
 ```
 
-**Guards, branching, families**
+**Guards and families**
 
 ```
 Γ ⊢ s ▷ g
 ──────────────────────────────────────────              (T-IfGuard)
 Γ ⊢ if (guard) { s } ▷ stamp(g, guard)
 
-{ Γ ⊢ s_i ▷ g_i }_{i∈I finite}
-──────────────────────────────────────────              (T-Join-Finite)
-Γ ⊢ switch { s_i } ▷ ⊔_{i∈I} g_i
+───────────────────────────────                     (T-ForOffsets-∅)
+Γ ⊢ for offsets [] ▷ ε
 
-{ Γ ⊢ body(k) ▷ g_k }_{k∈K finite}
-──────────────────────────────────────────────────────  (T-ForOffsets)
-Γ ⊢ for off∈K { body(off) } ▷ Fold(⊙, ε, { g_k }_{k∈K})
+Γ ⊢ s ▷ g₁    Γ ⊢ for offsets ks ▷ g₂
+──────────────────────────────────────────            (T-ForOffsets-Cons)
+Γ ⊢ for offsets ((k, s) :: ks) ▷ g₁ ⊙ g₂
 ```
 
 **Parallel threads (crux)**
 
 ```
 Γ ⊢ body ▷ g
-Disj_wg(g)   RAWsafe_wg(g)   Disj_st(g)   RAWsafe_st(g)
+∀ p ∈ phases(g), WritesDisjointPhase p ∧ NoRAWIntraPhase p
 ──────────────────────────────────────────────────────── (T-ForThreads)
 Γ ⊢ for_threads { body } ▷ g
 ```
 
-- `Disj_s(g)`: for every phase of `g` in space `s`, pairwise-disjoint writes across distinct threads
-- `RAWsafe_s(g)`: no **intra-phase** read-after-write in space `s` (cross-phase RAW/WAW are OK because barriers split phases)
+- `phases(g)` is `Grade.phases g` (exposed in Lean for the side-condition)
+- `WritesDisjointPhase` / `NoRAWIntraPhase` come from `Effects.lean`
 
 ### Explanations & side-conditions
+
+**(T-Load/T-Store)** — _Singleton footprints_
+Reads and writes contribute singleton phases (`Grade.ofRead/ofWrite`) guarded by `guardAll`. Memory space is distinguished inside `loc.space`.
 
 **(T-Seq)** — _Sequential composition_
 The grade of `s ; t` is `g ⊙ h` (concatenation of phase traces).
 Denotation law: `⟦g ⊙ h⟧ = ⟦g⟧ ⊗ ⟦h⟧` in the quantale.
 
 **(T-Barrier-WG/ST)** — _Phase splitting_
-Introduces a phase boundary for that space; used to separate cross-phase dependences. Operationally: collective barrier; semantically: cut in the word.
+Both rules currently share the same barrier phase (`Grade.ofBarrier`); you can refine them later to track workgroup/storage separately.
 
 **(T-IfGuard)** — _Guard stamping_
 All accesses in `g` inherit the guard (`tid % step = phase`). Critical for discharge of disjointness (only **active** threads write).
 
-**(T-Join-Finite)** — _Branching / case split_
-Effect is the finite join of branches. Denotation matches set union; distributivity of `⊗` over `⋁` comes from the quantale.
-
-**(T-ForOffsets)** — _Unrolled families / stages_
-Sequentially folds a finite family of bodies (`off` values) using `⊙`. In practice, each stage ends with a barrier so phases remain separate.
+**(T-ForOffsets-∅/Cons)** — _Finite stage sequencing_
+`for offsets` is encoded as an explicit list. The empty list contributes `ε`; each cons point sequences the head grade in front of the recursive result, mirroring the Lean constructors `g_for_offsets_nil` / `g_for_offsets_cons`.
 
 **(T-ForThreads)** — _Parallel threads / DRF gate_
-Keeps the body’s grade `g` but **requires** per-phase, per-space obligations:
-
-- **WritesDisjointPhase**: no two distinct threads write the same `(space, base, addr)` in a phase
-- **NoRAWIntraPhase**: no read aliases a write in that same phase
-  Cross-phase RAW/WAW are allowed because barriers induce happens-before and move the effects into **different** phases.
+Keeps the body’s grade `g` but **requires** the side-condition `(∀ p ∈ Grade.phases g, WritesDisjointPhase p ∧ NoRAWIntraPhase p)`. Cross-phase hazards remain allowed because barriers split the word into distinct phases.
 
 > In code, these obligations are proved by arithmetic over `Aff2` indices and guard predicates (e.g. Blelloch upsweep: `tid % (2·off)=0` and writes `buf[tid + 2·off − 1]` are pairwise distinct).
 
