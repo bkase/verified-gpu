@@ -102,64 +102,61 @@ Abbreviations:
 
 **Basic constructs**
 
-```
-───────────────────────────────                     (T-Skip)
-Γ ⊢ skip ▷ ε
+$$
+\frac{\ }{\Gamma \vdash \texttt{skip} \triangleright \varepsilon}\quad(\textsc{T-Skip})
+$$
 
-───────────────────────────────                     (T-Let)
-Γ ⊢ let x := e ▷ ε
-```
+$$
+\frac{\ }{\Gamma \vdash \texttt{let}\ x:=e \triangleright \varepsilon}\quad(\textsc{T-Let})
+$$
 
 **Memory effects**
 
-```
-───────────────────────────────────────────          (T-Load)
-Γ ⊢ load loc dst ▷ R(loc)
+$$
+\frac{\ }{\Gamma \vdash \texttt{load}\;loc\;dst \triangleright R(loc)}\quad(\textsc{T-Load})
+$$
 
-───────────────────────────────────────────          (T-Store)
-Γ ⊢ store loc rhs ▷ W(loc)
+$$
+\frac{\ }{\Gamma \vdash \texttt{store}\;loc\;rhs \triangleright W(loc)}\quad(\textsc{T-Store})
+$$
 
-───────────────────────────────                         (T-Atomic)
-Γ ⊢ atomicAdd loc rhs dst ▷ ε     [treated race-safe by device semantics]
-```
+$$
+\frac{\ }{\Gamma \vdash \texttt{atomicAdd}\;loc\;rhs\;dst \triangleright \varepsilon}\quad(\textsc{T-Atomic})
+$$
 
 **Composition and barriers**
 
-```
-Γ ⊢ s ▷ g     Γ ⊢ t ▷ h
-───────────────────────────────                         (T-Seq)
-Γ ⊢ s ; t ▷ g ⊙ h
+$$
+\frac{\Gamma \vdash s \triangleright g \quad \Gamma \vdash t \triangleright h}{\Gamma \vdash s ; t \triangleright g \odot h}\quad(\textsc{T-Seq})
+$$
 
-───────────────────────────────                         (T-Barrier-WG)
-Γ ⊢ workgroupBarrier ▷ B(ε)
+$$
+\frac{\ }{\Gamma \vdash \texttt{workgroupBarrier} \triangleright B(\varepsilon)}\quad(\textsc{T-Barrier-WG})
+$$
 
-───────────────────────────────                         (T-Barrier-ST)
-Γ ⊢ storageBarrier   ▷ B(ε)
-```
+$$
+\frac{\ }{\Gamma \vdash \texttt{storageBarrier} \triangleright B(\varepsilon)}\quad(\textsc{T-Barrier-ST})
+$$
 
 **Guards and families**
 
-```
-Γ ⊢ s ▷ g
-──────────────────────────────────────────              (T-IfGuard)
-Γ ⊢ if (guard) { s } ▷ stamp(g, guard)
+$$
+\frac{\Gamma \vdash s \triangleright g}{\Gamma \vdash \texttt{if}\ (guard)\ \{s\} \triangleright stamp(g,\,guard)}\quad(\textsc{T-IfGuard})
+$$
 
-───────────────────────────────                     (T-ForOffsets-∅)
-Γ ⊢ for offsets [] ▷ ε
+$$
+\frac{\ }{\Gamma \vdash \texttt{for\_offsets}\;[] \triangleright \varepsilon}\quad(\textsc{T-ForOffsets-}\varnothing)
+$$
 
-Γ ⊢ s ▷ g₁    Γ ⊢ for offsets ks ▷ g₂
-──────────────────────────────────────────            (T-ForOffsets-Cons)
-Γ ⊢ for offsets ((k, s) :: ks) ▷ g₁ ⊙ g₂
-```
+$$
+\frac{\Gamma \vdash s \triangleright g_1 \quad \Gamma \vdash \texttt{for\_offsets}\;ks \triangleright g_2}{\Gamma \vdash \texttt{for\_offsets}\;((k,s)::ks) \triangleright g_1 \odot g_2}\quad(\textsc{T-ForOffsets-Cons})
+$$
 
 **Parallel threads (crux)**
 
-```
-Γ ⊢ body ▷ g
-∀ p ∈ phases(g), WritesDisjointPhase p ∧ NoRAWIntraPhase p
-──────────────────────────────────────────────────────── (T-ForThreads)
-Γ ⊢ for_threads { body } ▷ g
-```
+$$
+\frac{\Gamma \vdash body \triangleright g \quad \forall p \in \mathrm{phases}(g),\;\mathrm{WritesDisjointPhase}(p) \wedge \mathrm{NoRAWIntraPhase}(p)}{\Gamma \vdash \texttt{for\_threads}\ \{body\} \triangleright g}\quad(\textsc{T-ForThreads})
+$$
 
 - `phases(g)` is `Grade.phases g` (exposed in Lean for the side-condition)
 - `WritesDisjointPhase` / `NoRAWIntraPhase` come from `Effects.lean`
