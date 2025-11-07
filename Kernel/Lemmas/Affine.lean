@@ -82,6 +82,41 @@ lemma downsweep_targets_distinct_same_tid
     simpa [sub_eq_add_neg, add_comm, add_left_comm, add_assoc] using this
   exact (ne_of_lt hlt) hmul
 
+/-- Under the upsweep guard (`tid % (2*off) = 0`) with `off > 0`,
+    the indices `tid + off - 1` and `tid' + 2*off - 1` cannot coincide. -/
+lemma upsweep_guard_mixed_targets_ne
+  {i j off : Nat} (hoff : 0 < off)
+  (hi : i % (2 * off) = 0) (hj : j % (2 * off) = 0) :
+  (Int.ofNat i + (Int.ofNat off - 1))
+    ≠ (Int.ofNat j + (2 * (Int.ofNat off) - 1)) := by
+  intro hEq
+  -- Move the `-1` terms to get a cleaner ℕ equality.
+  have hplus := congrArg (fun z => z + 1) hEq
+  have hNat :
+      i + off = j + 2 * off := by
+    have : Int.ofNat (i + off) = Int.ofNat (j + 2 * off) := by
+      simpa [Int.natCast_add, two_mul, add_comm, add_left_comm, add_assoc] using hplus
+    exact Int.ofNat.inj this
+  -- Evaluate both sides modulo `2*off`.
+  have hoff_lt : off < 2 * off := by
+    have : 1 < 2 := by decide
+    simpa [one_mul] using Nat.mul_lt_mul_of_pos_right this hoff
+  have hleft :
+      (i + off) % (2 * off) = off := by
+    have hoff_mod : off % (2 * off) = off := Nat.mod_eq_of_lt hoff_lt
+    simpa [Nat.add_mod, hi, hoff_mod, Nat.zero_mod] using
+      (Nat.add_mod i off (2 * off))
+  have hright :
+      (j + 2 * off) % (2 * off) = 0 := by
+    have htwo_mod : (2 * off) % (2 * off) = 0 := by
+      simp [Nat.mul_comm]
+    simpa [Nat.add_mod, hj, htwo_mod, Nat.zero_mod] using
+      (Nat.add_mod j (2 * off) (2 * off))
+  -- Take both sides of `hNat` modulo `2*off` to reach a contradiction.
+  have := congrArg (fun n => n % (2 * off)) hNat
+  simp [hleft, hright] at this
+  exact (Nat.ne_of_gt hoff) this
+
 /-
   How to use these lemmas in your phase obligations:
 

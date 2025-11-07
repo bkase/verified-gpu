@@ -61,6 +61,8 @@ Kernel/                 -- Core WGSL-like IR & typing judgment
   Typing.lean           -- Graded typing rules + synthesizer (`gradeOf`)
   Lemmas/               -- Reusable arithmetic and guard reasoning facts
     Affine.lean         -- Affine index lemmas for Blelloch-style scans
+  Examples/             -- Drop-in proof patterns for specific kernels
+    Blelloch.lean       -- Upsweep/downsweep phases + HasGrade helpers
 Tests/                  -- Quick grade synthesis checks
   GradeEval.lean        -- End-to-end sample touching every statement form
 lakefile.lean           -- Lake config (packages & targets)
@@ -195,6 +197,8 @@ Keeps the body’s grade `g` but **requires** the side-condition `(∀ p ∈ Gra
 > In code, these obligations are proved by arithmetic over `Aff2` indices and guard predicates (e.g. Blelloch upsweep: `tid % (2·off)=0` and writes `buf[tid + 2·off − 1]` are pairwise distinct).
 
 Reusable arithmetic lemmas for these obligations live in `Kernel/Lemmas/Affine.lean`. They cover constant shifts on `Int`, lifting `Nat` disequality to `Int`, and the injectivity facts needed for the upsweep/downsweep indices.
+
+If you want a worked example, `Kernel/Examples/Blelloch.lean` constructs the per-offset phases, packages them into grades with barriers, and shows how to apply `HasGrade.g_for_threads` by citing the affine lemmas.
 
 ---
 
