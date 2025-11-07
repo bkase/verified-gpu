@@ -134,6 +134,33 @@ lemma upsweep_guard_mixed_targets_ne_sym
   exact
     (upsweep_guard_mixed_targets_ne (i := j) (j := i) (off := off) hoff hj hi) hEq'
 
+/-- If `i % (2*off) = 0` then `2*off ∣ i`. Useful when turning guards into divisibility. -/
+lemma guard_zero_iff_dvd {i off : Nat} :
+  i % (2 * off) = 0 → (2 * off ∣ i) := by
+  intro h
+  exact Nat.dvd_of_mod_eq_zero h
+
+/-- If `off>0` and `i % (2*off)=0`, then `(i + off) % (2*off) = off`. -/
+lemma mod_after_shift_is_off {i off : Nat} (hoff : 0 < off)
+  (hi : i % (2 * off) = 0) :
+  (i + off) % (2 * off) = off := by
+  have lt : off < 2 * off := by
+    have : 1 < 2 := by decide
+    simpa [one_mul] using Nat.mul_lt_mul_of_pos_right this hoff
+  have h1 : off % (2 * off) = off := Nat.mod_eq_of_lt lt
+  simpa [Nat.add_mod, hi, h1, Nat.zero_mod] using (Nat.add_mod i off (2 * off))
+
+/-- A bookkeeping lemma: if `off>0` and `j = i + 2*off - 1`, then `j+1 = i + 2*off`. -/
+lemma succ_of_right_target {i j off : Nat} (hoff : 0 < off) :
+  j = i + 2 * off - 1 → j + 1 = i + 2 * off := by
+  intro h
+  subst h
+  have hmul : 0 < 2 * off := Nat.mul_pos (by decide : 0 < 2) hoff
+  have hpos : 0 < i + 2 * off := Nat.add_pos_right (a := i) hmul
+  have hle : 1 ≤ i + 2 * off := Nat.succ_le_of_lt hpos
+  have := Nat.sub_add_cancel hle
+  simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
+
 /-
   How to use these lemmas in your phase obligations:
 

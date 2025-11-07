@@ -263,5 +263,304 @@ lemma hasGrade_forThreads_wgScan {Γ : Ctx} {body : Stmt}
 
 end WG
 
+/-! ## Concrete IR + grades that mirror `gradeOf` -------------------------------- -/
+namespace WG.IR
+
+open Kernel
+open Kernel.Examples
+open Effects
+open Grade
+open Kernel.HasGrade
+open Kernel.Lemmas
+
+/-- Build a workgroup `Loc` for `buf[tid + shift]`. -/
+@[inline] def wgLoc (shift : Int) : Kernel.Loc :=
+  { space := .workgroup
+  , base  := "buf"
+  , idx   := { a_tid := 1, a_off := 0, b := shift } }
+
+/-- One upsweep stage as concrete IR: guarded load, then guarded store, then barrier. -/
+def upsweepBody (off : Nat) : Stmt :=
+  let g  := upsweepGuard off
+  let rL := wgLoc (Int.ofNat off - 1)
+  let wR := wgLoc (2 * Int.ofNat off - 1)
+  .ite g (.seq (.load rL "_tmp") (.store wR (.var "_tmp")))
+
+def upsweepStmt (off : Nat) : Stmt :=
+  .seq (upsweepBody off) .barrier_wg
+
+/-- One downsweep stage as concrete IR: two guarded stores, then barrier. -/
+def downsweepBody (off : Nat) : Stmt :=
+  let g  := upsweepGuard off
+  let wL := wgLoc (Int.ofNat off - 1)
+  let wR := wgLoc (2 * Int.ofNat off - 1)
+  .ite g (.seq (.store wL (.var "_a")) (.store wR (.var "_b")))
+
+def downsweepStmt (off : Nat) : Stmt :=
+  .seq (downsweepBody off) .barrier_wg
+
+/-- All upsweep stages in list order. -/
+def wgUpsweepStmt (offs : List Nat) : Stmt :=
+  .for_offsets (offs.map (fun o => (o, upsweepStmt o)))
+
+/-- All downsweep stages in reverse order (right-to-left). -/
+def wgDownsweepStmt (offs : List Nat) : Stmt :=
+  .for_offsets ((offs.reverse).map (fun o => (o, downsweepStmt o)))
+
+/-- Full workgroup scan statement. -/
+def wgScanStmt (offs : List Nat) : Stmt :=
+  .seq (wgUpsweepStmt offs) (wgDownsweepStmt offs)
+
+/-- IR grade for a single upsweep stage: guard-stamped read, then write, then barrier. -/
+def gradeUpsweepIR (off : Nat) : Grade :=
+  let g  := upsweepGuard off
+  let r  := asRead (wgLoc (Int.ofNat off - 1)) guardAll
+  let w  := asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll
+  Grade.seq (stampGrade (Grade.seq (Grade.ofRead r) (Grade.ofWrite w)) g) Grade.ofBarrier
+
+/-- IR grade for a single downsweep stage: two guarded writes, then barrier. -/
+def gradeDownsweepIR (off : Nat) : Grade :=
+  let g  := upsweepGuard off
+  let wL := asWrite (wgLoc (Int.ofNat off - 1)) guardAll
+  let wR := asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll
+  Grade.seq (stampGrade (Grade.seq (Grade.ofWrite wL) (Grade.ofWrite wR)) g) Grade.ofBarrier
+
+/-- Folded IR grades matching the concrete statements. -/
+def gradeUpsweepsIR : List Nat → Grade
+| []      => Grade.eps
+| o :: os => Grade.seq (gradeUpsweepIR o) (gradeUpsweepsIR os)
+
+def gradeDownsweepsIR : List Nat → Grade
+| []      => Grade.eps
+| o :: os => Grade.seq (gradeDownsweepsIR os) (gradeDownsweepIR o)
+
+def wgScanGradeIR (offs : List Nat) : Grade :=
+  Grade.seq (gradeUpsweepsIR offs) (gradeDownsweepsIR offs)
+
+/-- Helper: sequencing `gradeOfOffsets` over appended lists. -/
+lemma gradeOfOffsets_append {xs ys : List (Nat × Stmt)} :
+  gradeOfOffsets (xs ++ ys) = Grade.seq (gradeOfOffsets xs) (gradeOfOffsets ys) := by
+  induction xs with
+  | nil => simp [gradeOfOffsets, Grade.seq, Grade.eps]
+  | cons x xs ih =>
+      rcases x with ⟨k, s⟩
+      simp [List.cons_append, gradeOfOffsets, Grade.seq, ih, mul_assoc]
+
+/-- `gradeOf` lines up with the IR upsweep statement. -/
+lemma gradeOf_upsweepStmt (off : Nat) :
+  gradeOf (upsweepStmt off) = gradeUpsweepIR off := by
+  simp [upsweepStmt, upsweepBody, gradeUpsweepIR, Grade.seq, gradeOf, stampGrade, wgLoc]
+
+lemma gradeOf_downsweepStmt (off : Nat) :
+  gradeOf (downsweepStmt off) = gradeDownsweepIR off := by
+  simp [downsweepStmt, downsweepBody, gradeDownsweepIR, Grade.seq, gradeOf, stampGrade, wgLoc]
+
+lemma gradeOfOffsets_upsweep (offs : List Nat) :
+  gradeOfOffsets (offs.map (fun o => (o, upsweepStmt o))) = gradeUpsweepsIR offs := by
+  induction offs with
+  | nil => simp [gradeOfOffsets, gradeUpsweepsIR]
+  | cons o os ih =>
+      simp [gradeOfOffsets, gradeUpsweepsIR, gradeOf_upsweepStmt, ih, Grade.seq]
+
+lemma gradeOfOffsets_downsweep (offs : List Nat) :
+  gradeOfOffsets ((offs.reverse).map (fun o => (o, downsweepStmt o))) =
+    gradeDownsweepsIR offs := by
+  induction offs with
+  | nil => simp [gradeOfOffsets, gradeDownsweepsIR]
+  | cons o os ih =>
+      have ih' :
+          gradeOfOffsets
+              ((List.map (fun o => (o, downsweepStmt o)) os).reverse) =
+                gradeDownsweepsIR os := by
+        simpa [List.map_reverse] using ih
+      simp [gradeDownsweepsIR, List.reverse_cons, List.map_append, List.map,
+            List.map_reverse, gradeOfOffsets_append, gradeOf_downsweepStmt, ih',
+            Grade.seq, Grade.eps, gradeOfOffsets]
+
+lemma gradeOf_wgUpsweepStmt (offs : List Nat) :
+  gradeOf (wgUpsweepStmt offs) = gradeUpsweepsIR offs := by
+  simpa [wgUpsweepStmt, gradeOf] using gradeOfOffsets_upsweep offs
+
+lemma gradeOf_wgDownsweepStmt (offs : List Nat) :
+  gradeOf (wgDownsweepStmt offs) = gradeDownsweepsIR offs := by
+  simpa [wgDownsweepStmt, gradeOf] using gradeOfOffsets_downsweep offs
+
+lemma gradeOf_wgScanStmt (offs : List Nat) :
+  gradeOf (wgScanStmt offs) = wgScanGradeIR offs := by
+  simp [wgScanStmt, wgScanGradeIR, gradeOf, gradeOf_wgUpsweepStmt, gradeOf_wgDownsweepStmt,
+        Grade.seq]
+
+/-- Read-only single phase is trivially safe. -/
+private lemma read_only_safe (a : Access) :
+  PhasesSafe (Word.ofList [⟨[a], []⟩]) :=
+  PhasesSafe.singleton <| by
+    constructor
+    · intro i j off a' b' hij ha hb _ _ _
+      simp at hb
+    · intro i j off r w hr hw _ _
+      simp at hw
+
+/-- Write-only single phase for upsweep’s right target is safe across threads. -/
+private lemma write_only_upsweep_safe (off : Nat) :
+  PhasesSafe (Word.ofList
+    [⟨[], [wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off)]⟩]) :=
+  PhasesSafe.singleton <| by
+    constructor
+    · intro i j offV a b hij ha hb _ hi hj
+      have ha' :
+          a = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by
+        simpa using ha
+      have hb' :
+          b = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by
+        simpa using hb
+      subst ha'
+      subst hb'
+      simpa [wgBuf, Aff2.eval] using upsweep_index_distinct off hij
+    · intro i j offV r w hr _ _ _
+      simp at hr
+
+/-- Left-hand downsweep write is safe. -/
+private lemma write_only_down_left_safe (off : Nat) :
+  PhasesSafe (Word.ofList
+    [⟨[], [wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off)]⟩]) :=
+  PhasesSafe.singleton <| by
+    constructor
+    · intro i j offV a b hij ha hb _ hi hj
+      have ha' :
+          a = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) := by simpa using ha
+      have hb' :
+          b = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) := by simpa using hb
+      subst ha'
+      subst hb'
+      simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).left
+    · intro i j offV r w hr _ _ _
+      simp at hr
+
+/-- Right-hand downsweep write is safe. -/
+private lemma write_only_down_right_safe (off : Nat) :
+  PhasesSafe (Word.ofList
+    [⟨[], [wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off)]⟩]) :=
+  PhasesSafe.singleton <| by
+    constructor
+    · intro i j offV a b hij ha hb _ hi hj
+      have ha' :
+          a = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by simpa using ha
+      have hb' :
+          b = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by simpa using hb
+      subst ha'
+      subst hb'
+      simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).right
+    · intro i j offV r w hr _ _ _
+      simp at hr
+
+/-- Each upsweep IR stage is safe: read, then write, then barrier. -/
+lemma gradeUpsweepIR_safe (off : Nat) :
+  PhasesSafe (gradeUpsweepIR off) := by
+  dsimp [gradeUpsweepIR]
+  have hread :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[asRead (wgLoc (Int.ofNat off - 1)) guardAll], []⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asRead, wgBuf] using
+      read_only_safe (wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off))
+  have hwrite :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[], [asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll]⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asWrite, wgBuf] using
+      write_only_upsweep_safe off
+  have hbar := PhasesSafe.barrier
+  simpa [Grade.seq] using PhasesSafe.seq (PhasesSafe.seq hread hwrite) hbar
+
+/-- Each downsweep IR stage is safe: two writes then a barrier. -/
+lemma gradeDownsweepIR_safe (off : Nat) :
+  PhasesSafe (gradeDownsweepIR off) := by
+  dsimp [gradeDownsweepIR]
+  have hl :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[], [asWrite (wgLoc (Int.ofNat off - 1)) guardAll]⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asWrite, wgBuf] using
+      write_only_down_left_safe off
+  have hr :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[], [asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll]⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asWrite, wgBuf] using
+      write_only_down_right_safe off
+  have hbar := PhasesSafe.barrier
+  simpa [Grade.seq] using PhasesSafe.seq (PhasesSafe.seq hl hr) hbar
+
+lemma gradeUpsweepsIR_safe {offs : List Nat} :
+  PhasesSafe (gradeUpsweepsIR offs) := by
+  induction offs with
+  | nil => simpa [gradeUpsweepsIR] using PhasesSafe.eps
+  | cons o os ih =>
+      simpa [gradeUpsweepsIR, Grade.seq] using
+        PhasesSafe.seq (gradeUpsweepIR_safe o) ih
+
+lemma gradeDownsweepsIR_safe {offs : List Nat} :
+  PhasesSafe (gradeDownsweepsIR offs) := by
+  induction offs with
+  | nil => simpa [gradeDownsweepsIR] using PhasesSafe.eps
+  | cons o os ih =>
+      simpa [gradeDownsweepsIR, Grade.seq] using
+        PhasesSafe.seq ih (gradeDownsweepIR_safe o)
+
+lemma wgScanGradeIR_safe {offs : List Nat} :
+  PhasesSafe (wgScanGradeIR offs) := by
+  simpa [wgScanGradeIR, Grade.seq] using
+    PhasesSafe.seq (gradeUpsweepsIR_safe (offs := offs))
+                   (gradeDownsweepsIR_safe (offs := offs))
+
+lemma ThreadsFree_upsweepStmt (off : Nat) :
+  ThreadsFree (upsweepStmt off) := by
+  unfold upsweepStmt upsweepBody
+  simp [ThreadsFree]
+
+lemma ThreadsFree_downsweepStmt (off : Nat) :
+  ThreadsFree (downsweepStmt off) := by
+  unfold downsweepStmt downsweepBody
+  simp [ThreadsFree]
+
+lemma ThreadsFreeOffsets_map_upsweep (offs : List Nat) :
+  ThreadsFreeOffsets (offs.map (fun o => (o, upsweepStmt o))) := by
+  induction offs with
+  | nil => simp
+  | cons o os ih =>
+      simp [ih, ThreadsFree_upsweepStmt]
+
+lemma ThreadsFreeOffsets_map_downsweep (offs : List Nat) :
+  ThreadsFreeOffsets (offs.map (fun o => (o, downsweepStmt o))) := by
+  induction offs with
+  | nil => simp
+  | cons o os ih =>
+      simp [ih, ThreadsFree_downsweepStmt]
+
+lemma ThreadsFree_wgUpsweepStmt (offs : List Nat) :
+  ThreadsFree (wgUpsweepStmt offs) := by
+  simpa [wgUpsweepStmt] using ThreadsFreeOffsets_map_upsweep offs
+
+lemma ThreadsFree_wgDownsweepStmt (offs : List Nat) :
+  ThreadsFree (wgDownsweepStmt offs) := by
+  have h := ThreadsFreeOffsets_map_downsweep (offs.reverse)
+  simpa [wgDownsweepStmt] using h
+
+lemma ThreadsFree_wgScanStmt (offs : List Nat) :
+  ThreadsFree (wgScanStmt offs) := by
+  simp [wgScanStmt, ThreadsFree_wgUpsweepStmt, ThreadsFree_wgDownsweepStmt]
+
+/-- Final wrapper: synthesize `for_threads` over the concrete scan body. -/
+lemma hasGrade_forThreads_wgScanStmt {Γ : Ctx} {offs : List Nat} :
+  HasGrade Γ (.for_threads (wgScanStmt offs)) (gradeOf (wgScanStmt offs)) := by
+  have hb : HasGrade Γ (wgScanStmt offs) (gradeOf (wgScanStmt offs)) :=
+    gradeOf_sound_noThreads (Γ := Γ) (s := wgScanStmt offs)
+      (ThreadsFree_wgScanStmt offs)
+  have hs : PhasesSafe (gradeOf (wgScanStmt offs)) := by
+    simpa [gradeOf_wgScanStmt] using wgScanGradeIR_safe (offs := offs)
+  exact HasGrade.g_for_threads hb hs
+
+end WG.IR
+
 end Examples
 end Kernel
