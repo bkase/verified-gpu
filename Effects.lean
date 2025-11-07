@@ -326,6 +326,129 @@ lemma normalizeList_stage_pair (p q : Phase)
   simpa [normalizeList, List.cons_append]
       using normalizeList_stage_append (p := p) (q := q) (rest := []) hp hq
 
+/-! ### Normalizer cuts at the explicit barrier -/
+
+@[simp] lemma empty_canonical : (⟨[], []⟩ : Phase).empty = true := rfl
+
+private lemma normalizeList_loop_append_barrier_right
+    (curr : Option Phase) (xs acc : List Phase) :
+    normalizeList.loop curr (xs ++ [⟨[], []⟩, ⟨[], []⟩]) acc
+      = normalizeList.loop curr xs acc ++ [⟨[], []⟩, ⟨[], []⟩] := by
+  revert curr acc
+  induction xs with
+  | nil =>
+      intro curr acc
+      cases curr with
+      | none =>
+          simp [normalizeList.loop, List.append_assoc, empty_canonical]
+      | some p =>
+          simp [normalizeList.loop, List.append_assoc, empty_canonical]
+  | cons x xs ih =>
+      intro curr acc
+      cases curr with
+      | none =>
+          cases hxeq : x.empty with
+          | false =>
+              have := ih (curr := some x) (acc := acc)
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+          | true =>
+              have := ih (curr := none) (acc := acc ++ [x])
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+      | some p =>
+          cases hxeq : x.empty with
+          | false =>
+              have := ih (curr := some (Phase.fuse p x)) (acc := acc)
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+          | true =>
+              have := ih (curr := none) (acc := acc ++ [p, x])
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+
+/-- Appending the explicit barrier pair on the right just appends it after normalization. -/
+lemma normalizeList_append_barrier_right (xs : List Phase) :
+    normalizeList (xs ++ [⟨[], []⟩, ⟨[], []⟩])
+      = normalizeList xs ++ [⟨[], []⟩, ⟨[], []⟩] := by
+  simpa [normalizeList]
+    using normalizeList_loop_append_barrier_right (curr := none) (xs := xs) (acc := [])
+
+private lemma normalizeList_loop_after_barrier
+    (curr : Option Phase) (xs ys acc : List Phase) :
+    normalizeList.loop curr (xs ++ [⟨[], []⟩, ⟨[], []⟩] ++ ys) acc
+      = normalizeList.loop none ys
+          (normalizeList.loop curr (xs ++ [⟨[], []⟩, ⟨[], []⟩]) acc) := by
+  revert curr acc
+  induction xs with
+  | nil =>
+      intro curr acc
+      cases curr with
+      | none =>
+          simp [normalizeList.loop, List.append_assoc, empty_canonical]
+      | some p =>
+          simp [normalizeList.loop, List.append_assoc, empty_canonical]
+  | cons x xs ih =>
+      intro curr acc
+      cases curr with
+      | none =>
+          cases hxeq : x.empty with
+          | false =>
+              have := ih (curr := some x) (acc := acc)
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+          | true =>
+              have := ih (curr := none) (acc := acc ++ [x])
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+      | some p =>
+          cases hxeq : x.empty with
+          | false =>
+              have := ih (curr := some (Phase.fuse p x)) (acc := acc)
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+          | true =>
+              have := ih (curr := none) (acc := acc ++ [p, x])
+              simpa [normalizeList.loop, List.cons_append, hxeq, List.append_assoc]
+                using this
+
+/-- Middle-barrier cut: normalization splits across the explicit barrier pair. -/
+lemma normalizeList_barrier_middle_append (xs ys : List Phase) :
+    normalizeList (xs ++ [⟨[], []⟩, ⟨[], []⟩] ++ ys)
+      = normalizeList xs ++ [⟨[], []⟩, ⟨[], []⟩] ++ normalizeList ys := by
+  have hcut :=
+    normalizeList_loop_after_barrier (curr := none)
+        (xs := xs) (ys := ys) (acc := [])
+  have happ :=
+    normalizeList_loop_none_append
+      (ps := ys)
+      (acc := normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) [])
+  have hprefix :=
+    normalizeList_loop_append_barrier_right (curr := none)
+      (xs := xs) (acc := [])
+  unfold normalizeList at hcut ⊢
+  have hcut' :
+      normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩] ++ ys) []
+        = normalizeList.loop none ys
+            (normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) []) := hcut
+  have happ' :
+      normalizeList.loop none ys
+          (normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) [])
+        = normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) []
+            ++ normalizeList.loop none ys [] := happ
+  have hprefix' :
+      normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) []
+        = normalizeList.loop none xs [] ++ [⟨[], []⟩, ⟨[], []⟩] := hprefix
+  calc
+    normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩] ++ ys) []
+        = normalizeList.loop none ys
+            (normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) []) := hcut'
+    _ = normalizeList.loop none (xs ++ [⟨[], []⟩, ⟨[], []⟩]) []
+            ++ normalizeList.loop none ys [] := happ'
+    _ = (normalizeList.loop none xs [] ++ [⟨[], []⟩, ⟨[], []⟩])
+            ++ normalizeList.loop none ys [] := by
+          simp [hprefix', List.append_assoc]
+
 /-- Normalize a grade: fuse adjacent non-empty phases, never across empties. -/
 def normalize (g : Grade) : Grade :=
   match g with
