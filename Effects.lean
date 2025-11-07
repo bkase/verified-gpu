@@ -41,6 +41,20 @@ structure Phase where
   writes : List Access := []
 deriving DecidableEq, Repr
 
+namespace Phase
+
+/-- Is this phase empty (no reads, no writes)? -/
+@[inline] def empty (p : Phase) : Bool :=
+  match p.reads, p.writes with
+  | [], [] => true
+  | _,  _  => false
+
+/-- Fuse two non-empty phases by concatenating their footprints. -/
+@[inline] def fuse (p q : Phase) : Phase :=
+  { reads := p.reads ++ q.reads, writes := p.writes ++ q.writes }
+
+end Phase
+
 /-- Our language alphabet is `Phase`. -/
 abbrev PhaseLang := LanguageQuantale.Lang Phase
 
@@ -50,54 +64,310 @@ abbrev Grade := LanguageQuantale.Word Phase
 namespace Grade
 open LanguageQuantale
 
-/-- View the underlying list of phases. -/
-@[simp] lemma toList_mul (g h : Grade) :
-    ((g * h : Grade) : List Phase) = g.toList ++ h.toList :=
-  Word.toList_mul g h
+private def normalizeList.loop :
+    Option Phase → List Phase → List Phase → List Phase
+| none, [], acc => acc
+| some p, [], acc => acc ++ [p]
+| none, q :: qs, acc =>
+    if q.empty then
+      loop none qs (acc ++ [q])
+    else
+      loop (some q) qs acc
+| some p, q :: qs, acc =>
+    if q.empty then
+      loop none qs (acc ++ [p, q])
+    else
+      loop (some (Phase.fuse p q)) qs acc
 
-/-- Normalize: fuse adjacent empty boundaries (optional: keep simple for now). -/
-def normalize (g : Grade) : Grade := g   -- plug in a real normalizer later if you want
+@[simp] lemma normalizeList_loop_none_nil (acc : List Phase) :
+    normalizeList.loop none [] acc = acc := rfl
 
-/-- Sequential composition = concatenate phase lists, then normalize. -/
-def seq (g h : Grade) : Grade := normalize (g * h)
+@[simp] lemma normalizeList_loop_some_nil (p : Phase) (acc : List Phase) :
+    normalizeList.loop (some p) [] acc = acc ++ [p] := rfl
+
+@[simp] lemma normalizeList_loop_none_cons_empty
+    {q : Phase} {qs acc}
+    (hq : q.empty = true) :
+    normalizeList.loop none (q :: qs) acc
+      = normalizeList.loop none qs (acc ++ [q]) := by
+  simp [normalizeList.loop, hq]
+
+@[simp] lemma normalizeList_loop_none_cons_nonempty
+    {q : Phase} {qs acc}
+    (hq : q.empty = false) :
+    normalizeList.loop none (q :: qs) acc
+      = normalizeList.loop (some q) qs acc := by
+  simp [normalizeList.loop, hq]
+
+@[simp] lemma normalizeList_loop_some_cons_empty
+    {p q : Phase} {qs acc}
+    (hq : q.empty = true) :
+    normalizeList.loop (some p) (q :: qs) acc
+      = normalizeList.loop none qs (acc ++ [p, q]) := by
+  simp [normalizeList.loop, hq]
+
+@[simp] lemma normalizeList_loop_some_cons_nonempty
+    {p q : Phase} {qs acc}
+    (hq : q.empty = false) :
+    normalizeList.loop (some p) (q :: qs) acc
+      = normalizeList.loop (some (Phase.fuse p q)) qs acc := by
+  simp [normalizeList.loop, hq]
+
+/-- Accumulator prefixing lemma for the normalizer loop. -/
+lemma normalizeList_loop_append
+    (curr : Option Phase) (ps acc : List Phase) :
+    normalizeList.loop curr ps acc
+      = acc ++ normalizeList.loop curr ps [] := by
+  induction ps generalizing curr acc with
+  | nil =>
+      cases curr <;> simp
+  | cons q qs ih =>
+      cases curr with
+      | none =>
+          by_cases hq : q.empty = true
+          ·
+            have hleft :=
+              normalizeList_loop_none_cons_empty
+                (q := q) (qs := qs) (acc := acc) hq
+            have hright_eq :=
+              normalizeList_loop_none_cons_empty
+                (q := q) (qs := qs) (acc := []) hq
+            have hright := hright_eq
+            simp [List.nil_append] at hright
+            have hIH_acc := ih (curr := none) (acc := acc ++ [q])
+            have hIH_q :=
+              (ih (curr := none) (acc := [q])).symm
+            have hIH_q' := congrArg (fun xs => acc ++ xs) hIH_q
+            calc
+              normalizeList.loop none (q :: qs) acc
+                  = normalizeList.loop none qs (acc ++ [q]) := hleft
+              _ = (acc ++ [q]) ++ normalizeList.loop none qs [] := hIH_acc
+              _ = acc ++ ([q] ++ normalizeList.loop none qs []) := by
+                    simp [List.append_assoc]
+              _ = acc ++ normalizeList.loop none qs [q] := hIH_q'
+              _ = acc ++ normalizeList.loop none (q :: qs) [] := by
+                    simp [hright]
+          ·
+            have hstep :
+                normalizeList.loop none (q :: qs) acc
+                  = normalizeList.loop (some q) qs acc := by
+              simp [normalizeList_loop_none_cons_nonempty, hq]
+            have hstep₀ :
+                normalizeList.loop none (q :: qs) []
+                  = normalizeList.loop (some q) qs [] := by
+              simp [normalizeList_loop_none_cons_nonempty, hq]
+            have hIH_some := ih (curr := some q) (acc := acc)
+            calc
+              normalizeList.loop none (q :: qs) acc
+                  = normalizeList.loop (some q) qs acc := hstep
+              _ = acc ++ normalizeList.loop (some q) qs [] := hIH_some
+              _ = acc ++ normalizeList.loop none (q :: qs) [] := by
+                    simp [hstep₀]
+      | some p =>
+          by_cases hq : q.empty = true
+          ·
+            have hleft :=
+              normalizeList_loop_some_cons_empty
+                (p := p) (q := q) (qs := qs) (acc := acc) hq
+            have hright_eq :=
+              normalizeList_loop_some_cons_empty
+                (p := p) (q := q) (qs := qs) (acc := []) hq
+            have hright := hright_eq
+            simp [List.nil_append] at hright
+            have hIH_acc := ih (curr := none) (acc := acc ++ [p, q])
+            have hIH_pq :=
+              (ih (curr := none) (acc := [p, q])).symm
+            have hIH_pq' := congrArg (fun xs => acc ++ xs) hIH_pq
+            calc
+              normalizeList.loop (some p) (q :: qs) acc
+                  = normalizeList.loop none qs (acc ++ [p, q]) := hleft
+              _ = (acc ++ [p, q]) ++ normalizeList.loop none qs [] := hIH_acc
+              _ = acc ++ ([p, q] ++ normalizeList.loop none qs []) := by
+                    simp [List.append_assoc]
+              _ = acc ++ normalizeList.loop none qs [p, q] := hIH_pq'
+              _ = acc ++ normalizeList.loop (some p) (q :: qs) [] := by
+                    simp [hright]
+          ·
+            have hstep :
+                normalizeList.loop (some p) (q :: qs) acc
+                  = normalizeList.loop (some (Phase.fuse p q)) qs acc := by
+              simp [normalizeList_loop_some_cons_nonempty, hq]
+            have hstep₀ :
+                normalizeList.loop (some p) (q :: qs) []
+                  = normalizeList.loop (some (Phase.fuse p q)) qs [] := by
+              simp [normalizeList_loop_some_cons_nonempty, hq]
+            have hIH_fuse := ih (curr := some (Phase.fuse p q)) (acc := acc)
+            calc
+              normalizeList.loop (some p) (q :: qs) acc
+                  = normalizeList.loop (some (Phase.fuse p q)) qs acc := hstep
+              _ = acc ++ normalizeList.loop (some (Phase.fuse p q)) qs [] := hIH_fuse
+              _ = acc ++ normalizeList.loop (some p) (q :: qs) [] := by
+                    simp [hstep₀]
+
+lemma normalizeList_loop_none_append (ps acc : List Phase) :
+    normalizeList.loop none ps acc
+      = acc ++ normalizeList.loop none ps [] :=
+  normalizeList_loop_append none ps acc
+
+lemma normalizeList_loop_some_append (p : Phase) (ps acc : List Phase) :
+    normalizeList.loop (some p) ps acc
+      = acc ++ normalizeList.loop (some p) ps [] :=
+  normalizeList_loop_append (some p) ps acc
+
+/-- Compress a list of phases by merging maximal runs of non-empty phases.
+    Empty phases act as *hard* cuts and are preserved. -/
+def normalizeList (xs : List Phase) : List Phase :=
+  normalizeList.loop none xs []
+
+@[simp] lemma list_singleton_append {α} (x : α) (xs : List α) :
+    [x] ++ xs = x :: xs := rfl
+
+@[simp] lemma normalizeList_cons_empty {p : Phase} {ps : List Phase}
+    (hp : p.empty = true) :
+    normalizeList (p :: ps) = p :: normalizeList ps := by
+  unfold normalizeList
+  have hstep :=
+      normalizeList_loop_none_cons_empty
+        (q := p) (qs := ps) (acc := []) (hq := hp)
+  have hstep' := hstep
+  simp [List.nil_append] at hstep'
+  have happ :
+      normalizeList.loop none ps [p]
+        = p :: normalizeList.loop none ps [] := by
+    simpa [List.nil_append, list_singleton_append] using
+      (normalizeList_loop_none_append (ps := ps) (acc := [p]))
+  calc
+    normalizeList.loop none (p :: ps) []
+        = normalizeList.loop none ps [p] := hstep'
+    _ = p :: normalizeList.loop none ps [] := happ
+    _ = p :: normalizeList ps := rfl
+
+@[simp] lemma normalizeList_barrier :
+    normalizeList [⟨[], []⟩, ⟨[], []⟩] = [⟨[], []⟩, ⟨[], []⟩] := by
+  unfold normalizeList
+  simp [Phase.empty, List.nil_append]
+
+@[simp] lemma normalizeList_barrier_append (rest : List Phase) :
+    normalizeList ([⟨[], []⟩, ⟨[], []⟩] ++ rest)
+      = [⟨[], []⟩, ⟨[], []⟩] ++ normalizeList rest := by
+  unfold normalizeList
+  have hstep :
+      normalizeList.loop none ([⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest ([⟨[], []⟩, ⟨[], []⟩]) := by
+    simp [List.cons_append, Phase.empty, List.nil_append]
+  have happ :=
+      normalizeList_loop_none_append
+        (ps := rest) (acc := [⟨[], []⟩, ⟨[], []⟩])
+  simpa [hstep, normalizeList]
+
+lemma normalizeList_stage_append (p q : Phase) (rest : List Phase)
+    (hp : p.empty = false) (hq : q.empty = false) :
+    normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest)
+      = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] ++ normalizeList rest := by
+  unfold normalizeList
+  have hstep :
+      normalizeList.loop none
+        ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest
+            ([Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩]) := by
+    have h1 :
+        normalizeList.loop none
+            (p :: q :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some p)
+              (q :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_none_cons_nonempty, hp]
+    have h2 :
+        normalizeList.loop (some p)
+            (q :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some (Phase.fuse p q))
+              (⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_some_cons_nonempty, hq]
+    have h3 :
+        normalizeList.loop (some (Phase.fuse p q))
+            (⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop none
+              (⟨[], []⟩ :: rest)
+              ([Phase.fuse p q, ⟨[], []⟩]) := by
+      simp [normalizeList_loop_some_cons_empty, Phase.empty, List.nil_append]
+    have h4 :
+        normalizeList.loop none
+            (⟨[], []⟩ :: rest)
+            ([Phase.fuse p q, ⟨[], []⟩])
+          = normalizeList.loop none rest
+              ([Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩]) := by
+      simp [normalizeList_loop_none_cons_empty, Phase.empty,
+            List.nil_append]
+    simpa [List.cons_append]
+      using (h1.trans h2).trans (h3.trans h4)
+  have happ :
+      normalizeList.loop none rest
+          ([Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩])
+        = [Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList.loop none rest [] := by
+    simpa [List.nil_append] using
+      normalizeList_loop_none_append
+        (ps := rest)
+        (acc := [Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩])
+  calc
+    normalizeList.loop none
+        ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest
+            ([Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩]) := hstep
+    _ = [Phase.fuse p q, ⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList.loop none rest [] := happ
+    _ = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList rest := by
+          simp [normalizeList]
+
+lemma normalizeList_stage_pair (p q : Phase)
+    (hp : p.empty = false) (hq : q.empty = false) :
+    normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩])
+      = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+  simpa [normalizeList, List.cons_append]
+      using normalizeList_stage_append (p := p) (q := q) (rest := []) hp hq
+
+/-- Normalize a grade: fuse adjacent non-empty phases, never across empties. -/
+def normalize (g : Grade) : Grade :=
+  match g with
+  | ⟨phs⟩ => Word.ofList (normalizeList phs)
+
+@[simp] lemma normalize_ofList (xs : List Phase) :
+    normalize (Word.ofList xs) = Word.ofList (normalizeList xs) := rfl
+
+@[simp] lemma toList_normalize (g : Grade) :
+    (normalize g : List Phase) = normalizeList g.toList := by
+  cases g; simp [normalize]
+
+@[simp] lemma normalize_one : Grade.normalize (1 : Grade) = 1 := by
+  rfl
+
+/-- Sequential composition **without** implicit normalization. -/
+@[inline] def seq_raw (g h : Grade) : Grade := (g * h)
+
+/-- We keep the public `seq` as the raw concatenation (no hidden rewrites); the
+    normalizer is explicit and used only where we prove equivalences. -/
+@[inline] def seq (g h : Grade) : Grade := seq_raw g h
+
+@[inline] def ofBarrier : Grade := Word.ofList [⟨[], []⟩, ⟨[], []⟩]
 
 /-- Insert a *barrier* by starting a new empty phase at the end. -/
-def barrier (g : Grade) : Grade :=
-  normalize (Word.snoc g ⟨[], []⟩)
+@[inline] def barrier (g : Grade) : Grade := g * ofBarrier
 
 /-- The empty grade (no phases). -/
 def unit : Grade := 1
 
+/-- Sequential composition lemma for underlying lists. -/
+@[simp] lemma toList_mul (g h : Grade) :
+    ((g * h : Grade) : List Phase) = g.toList ++ h.toList :=
+  Word.toList_mul g h
 
-/-- `normalize` currently does nothing. -/
-@[simp] lemma normalize_eq (g : Grade) : normalize g = g := rfl
+/-- Singleton-language denotation of a grade, quotienting by normalization. -/
+def denote (g : Grade) : PhaseLang := { Grade.normalize g }
 
-/-- Singleton-language denotation of a concrete grade. -/
-def denote (g : Grade) : PhaseLang := { g }
-
-/-- Homomorphism laws you’ll use constantly. -/
+/-- Denotation of sequential composition normalizes the concatenation. -/
 lemma denote_seq (g h : Grade) :
-  denote (seq g h) = (denote g) * (denote h) := by
-  ext w; constructor
-  · intro hw
-    have hw' : w = g * h := by
-      simpa [denote, seq, normalize_eq, Set.mem_singleton_iff] using hw
-    subst hw'
-    refine ⟨g, ?_, h, ?_, rfl⟩
-    · simp [denote]
-    · simp [denote]
-  · intro hw
-    rcases hw with ⟨u, hu, v, hv, hcat⟩
-    have hu' : u = g := by
-      simpa [denote, Set.mem_singleton_iff] using hu
-    have hv' : v = h := by
-      simpa [denote, Set.mem_singleton_iff] using hv
-    have hword : w = g * h := by
-      simpa [hu', hv'] using hcat.symm
-    have hw' : w ∈ ({g * h} : PhaseLang) := by
-      subst hword
-      simp
-    simpa [denote, seq, normalize_eq] using hw'
+  denote (seq g h) = { Grade.normalize (g * h) } := by
+  simp [denote, Grade.seq, Grade.seq_raw]
 
 lemma denote_unit : denote unit = (1 : PhaseLang) := by
   ext w; constructor <;> intro hw
