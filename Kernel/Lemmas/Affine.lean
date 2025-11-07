@@ -120,6 +120,20 @@ lemma upsweep_guard_mixed_targets_ne
   simp [hleft, hright] at this
   exact (Nat.ne_of_gt hoff) this
 
+/-- Symmetric version: swapping the two targets under the same guard constraints. -/
+lemma upsweep_guard_mixed_targets_ne_sym
+  {i j off : Nat} (hoff : 0 < off)
+  (hi : i % (2 * off) = 0) (hj : j % (2 * off) = 0) :
+  (Int.ofNat i + (2 * (Int.ofNat off) - 1))
+    ≠ (Int.ofNat j + (Int.ofNat off - 1)) := by
+  intro hEq
+  have hEq' :
+      (Int.ofNat j + (Int.ofNat off - 1))
+        = (Int.ofNat i + (2 * (Int.ofNat off) - 1)) := by
+    simpa [add_comm, add_left_comm, add_assoc] using hEq.symm
+  exact
+    (upsweep_guard_mixed_targets_ne (i := j) (j := i) (off := off) hoff hj hi) hEq'
+
 /-
   How to use these lemmas in your phase obligations:
 

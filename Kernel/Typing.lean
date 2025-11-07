@@ -210,52 +210,5 @@ mutual
   | ⟨_, body⟩ :: rest => Grade.seq (gradeOf body) (gradeOfOffsets rest)
 end
 
-mutual
-  /-- Soundness sketch: the synthesized grade is derivable, assuming future lemmas discharge
-      the side-conditions for barriers/loops. -/
-  theorem gradeOf_sound {Γ} : ∀ s, HasGrade Γ s (gradeOf s)
-  | .skip =>
-      by simpa [gradeOf] using HasGrade.g_skip (Γ := Γ)
-  | .let_ name expr =>
-      by simpa [gradeOf] using HasGrade.g_let (Γ := Γ) (x := name) (e := expr)
-  | .load loc dst =>
-      by simpa [gradeOf] using HasGrade.g_load (Γ := Γ) (loc := loc) (dst := dst)
-  | .store loc rhs =>
-      by simpa [gradeOf] using HasGrade.g_store (Γ := Γ) (loc := loc) (rhs := rhs)
-  | .atomicAdd loc rhs dst =>
-      by simpa [gradeOf] using HasGrade.g_atomic (Γ := Γ) (loc := loc) (rhs := rhs) (dst := dst)
-  | .seq s t =>
-      by simpa [gradeOf] using HasGrade.g_seq (gradeOf_sound (Γ := Γ) s) (gradeOf_sound (Γ := Γ) t)
-  | .ite guard body =>
-      by
-        simpa [gradeOf] using HasGrade.g_if_guard (Γ := Γ) (g := guard) (s := body)
-          (gs := gradeOf body) (gradeOf_sound (Γ := Γ) body)
-  | .barrier_wg =>
-      by simpa [gradeOf] using HasGrade.g_bar_wg (Γ := Γ)
-  | .barrier_st =>
-      by simpa [gradeOf] using HasGrade.g_bar_st (Γ := Γ)
-  | .for_threads body =>
-      by
-        -- TODO: discharge the DRF side-condition witnesses emitted by `HasGrade.g_for_threads`.
-        admit
-  | .for_offsets items =>
-      by simpa [gradeOf] using gradeOfOffsets_sound (Γ := Γ) items
-
-  /-- Auxiliary soundness for `gradeOfOffsets`. -/
-  theorem gradeOfOffsets_sound {Γ} : ∀ items, HasGrade Γ (.for_offsets items) (gradeOfOffsets items)
-  | [] =>
-      by simpa [gradeOfOffsets] using HasGrade.g_for_offsets_nil (Γ := Γ)
-  | ⟨k, body⟩ :: rest =>
-      by
-        have hb : HasGrade Γ body (gradeOf body) := gradeOf_sound (Γ := Γ) body
-        have ht : HasGrade Γ (.for_offsets rest) (gradeOfOffsets rest) :=
-          gradeOfOffsets_sound (Γ := Γ) rest
-        simpa [gradeOfOffsets] using
-          HasGrade.g_for_offsets_cons (Γ := Γ) (k := k) (s := body) (ks := rest)
-            (gk := gradeOf body) (gks := gradeOfOffsets rest) hb ht
-end
-
-/-- Convenience wrapper with implicit context. -/
-theorem gradeOf_sound' {Γ s} : HasGrade Γ s (gradeOf s) := gradeOf_sound (Γ := Γ) s
 
 end Kernel

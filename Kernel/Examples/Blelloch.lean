@@ -119,13 +119,11 @@ lemma downsweep_WritesDisjoint (off : Nat) (hoff : 0 < off) :
   · subst ha; subst hb
     have hi0 : i % (2 * off) = 0 := guard_mod_eq_zero (by simpa [upsweepGuard] using hi)
     have hj0 : j % (2 * off) = 0 := guard_mod_eq_zero (by simpa [upsweepGuard] using hj)
-    have hneq := upsweep_guard_mixed_targets_ne hoff hj0 hi0
-    have hswap :
+    have hneq :
         (Int.ofNat i + (2 * Int.ofNat off - 1))
-          ≠ (Int.ofNat j + (Int.ofNat off - 1)) := by
-      intro hEq
-      exact hneq (by simpa using hEq.symm)
-    simpa [wgBuf, Aff2.eval, add_comm, add_left_comm, add_assoc] using hswap
+          ≠ (Int.ofNat j + (Int.ofNat off - 1)) :=
+      upsweep_guard_mixed_targets_ne_sym hoff hi0 hj0
+    simpa [wgBuf, Aff2.eval, add_comm, add_left_comm, add_assoc] using hneq
   · subst ha; subst hb
     simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).right
 
