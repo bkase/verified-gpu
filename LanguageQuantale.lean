@@ -42,6 +42,11 @@ instance : Mul (Word α) :=
 @[simp] lemma toList_mul (w₁ w₂ : Word α) :
     ((w₁ * w₂ : Word α) : List α) = w₁.toList ++ w₂.toList := rfl
 
+/-- Multiply two list-backed words by concatenating their lists. -/
+@[simp] lemma ofList_mul (xs ys : List α) :
+    (ofList xs * ofList ys : Word α) = ofList (xs ++ ys) := by
+  ext; simp [toList_mul]
+
 /-- Append a single letter to the right of a word. -/
 def snoc (w : Word α) (a : α) : Word α :=
   ofList (w.toList ++ [a])

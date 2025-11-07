@@ -59,6 +59,15 @@ def stampPhase (ph : Effects.Phase) (g : Guard) : Effects.Phase :=
 def stampGrade (gr : Effects.Grade) (g : Guard) : Effects.Grade :=
   Word.ofList <| (gr.toList.map (fun ph => stampPhase ph g))
 
+-- These facts keep normalization proofs lightweight.
+@[simp] lemma Phase.empty_stamp_read (a : Effects.Access) (g : Guard) :
+    Effects.Phase.empty (stampPhase ⟨[a], []⟩ g) = false := by
+  simp [stampPhase, Effects.Phase.empty]
+
+@[simp] lemma Phase.empty_stamp_write (a : Effects.Access) (g : Guard) :
+    Effects.Phase.empty (stampPhase ⟨[], [a]⟩ g) = false := by
+  simp [stampPhase, Effects.Phase.empty]
+
 /- ------------------------------ IR → primitive footprints ------------------------------ -/
 
 /-- Default guard = all threads active. -/
