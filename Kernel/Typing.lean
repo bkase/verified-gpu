@@ -187,9 +187,9 @@ lemma emptyPhase_safe :
   ∧ NoRAWIntraPhase ({ reads := [], writes := [] } : Effects.Phase) := by
   constructor
   · intro i j off a b hij ha hb _ _ _
-    simpa using ha
+    simp at ha
   · intro i j off r w hr _ _ _
-    simpa using hr
+    simp at hr
 
 /-- Predicate bundling the DRF side-condition required by `for_threads`. -/
 def PhasesSafe (g : Effects.Grade) : Prop :=
@@ -211,7 +211,7 @@ lemma seq {g h : Effects.Grade}
 
 lemma eps : PhasesSafe Grade.eps := by
   intro p hp
-  have : False := by simpa [Grade.eps, Grade.phases] using hp
+  have : False := by simp [Grade.eps, Grade.phases] at hp
   exact this.elim
 
 lemma singleton {p : Effects.Phase}
@@ -219,16 +219,21 @@ lemma singleton {p : Effects.Phase}
     PhasesSafe (Word.ofList [p]) := by
   intro q hq
   simp [Grade.phases] at hq
-  rcases hq with rfl | hnil
-  · simpa using hp
-  · cases hnil
+  subst hq
+  simpa using hp
 
 lemma barrier : PhasesSafe Grade.ofBarrier := by
   intro p hp
-  have hp' : p = { reads := [], writes := [] } := by
-    simp [Grade.ofBarrier, Grade.phases] at hp
-  subst hp'
-  simpa using emptyPhase_safe
+  have hmem : p = { reads := [], writes := [] } ∨
+      p = { reads := [], writes := [] } := by
+    simpa [Grade.ofBarrier, Grade.phases] using hp
+  cases hmem with
+  | inl hp_eq =>
+      subst hp_eq
+      simpa using emptyPhase_safe
+  | inr hp_eq =>
+      subst hp_eq
+      simpa using emptyPhase_safe
 
 end PhasesSafe
 
