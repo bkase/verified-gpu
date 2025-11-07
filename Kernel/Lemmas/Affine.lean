@@ -8,6 +8,9 @@ import Mathlib.Data.Int.Basic
 import Mathlib.Tactic.Linarith
 import Effects
 
+-- Can't figure out how to get some of these simpa's to go away
+set_option linter.unnecessarySimpa false
+
 namespace Kernel
 namespace Lemmas
 open Effects

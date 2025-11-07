@@ -59,9 +59,9 @@ lemma safety_empty_phase :
   NoRAWIntraPhase    { reads := [], writes := [] } := by
   constructor
   · intro i j off a b hij ha hb _ _ _
-    simpa using ha
+    simp at ha
   · intro i j off r w hr _ _ _
-    simpa using hr
+    simp at hr
 
 /-- Helper: reduce the guard constraint to `i % (2*off) = 0`. -/
 lemma guard_mod_eq_zero {off i : Nat}
