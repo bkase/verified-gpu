@@ -56,12 +56,8 @@ def gradeDownsweep (off : Nat) : Grade :=
 /-- Empty phases are trivially safe. -/
 lemma safety_empty_phase :
   WritesDisjointPhase { reads := [], writes := [] } ∧
-  NoRAWIntraPhase    { reads := [], writes := [] } := by
-  constructor
-  · intro i j off a b hij ha hb _ _ _
-    simp at ha
-  · intro i j off r w hr _ _ _
-    simp at hr
+  NoRAWIntraPhase    { reads := [], writes := [] } :=
+  Kernel.emptyPhase_safe
 
 /-- Helper: reduce the guard constraint to `i % (2*off) = 0`. -/
 lemma guard_mod_eq_zero {off i : Nat}
@@ -147,8 +143,7 @@ lemma downsweep_phase_safe (off : Nat) (hoff : 0 < off) :
 
 /-- Every phase in `gradeUpsweep off` satisfies the DRF side-conditions. -/
 lemma gradeUpsweep_safe (off : Nat) (hoff : 0 < off) :
-  ∀ p ∈ Grade.phases (gradeUpsweep off),
-    WritesDisjointPhase p ∧ NoRAWIntraPhase p := by
+  PhasesSafe (gradeUpsweep off) := by
   intro p hp
   have hmem :
       p ∈ [upsweepPhase off] ++ (Grade.ofBarrier).toList := by
@@ -165,8 +160,7 @@ lemma gradeUpsweep_safe (off : Nat) (hoff : 0 < off) :
 
 /-- Every phase in `gradeDownsweep off` satisfies the DRF side-conditions. -/
 lemma gradeDownsweep_safe (off : Nat) (hoff : 0 < off) :
-  ∀ p ∈ Grade.phases (gradeDownsweep off),
-    WritesDisjointPhase p ∧ NoRAWIntraPhase p := by
+  PhasesSafe (gradeDownsweep off) := by
   intro p hp
   have hmem :
       p ∈ [downsweepPhase off] ++ (Grade.ofBarrier).toList := by

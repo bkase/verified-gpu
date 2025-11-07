@@ -181,6 +181,57 @@ inductive HasGrade : Ctx → Kernel.Stmt → Effects.Grade → Prop
     (∀ p ∈ Grade.phases g, WritesDisjointPhase p ∧ NoRAWIntraPhase p) →
     HasGrade Γ (.for_threads body) g
 
+/-- The empty phase is trivially safe. -/
+lemma emptyPhase_safe :
+    WritesDisjointPhase ({ reads := [], writes := [] } : Effects.Phase)
+  ∧ NoRAWIntraPhase ({ reads := [], writes := [] } : Effects.Phase) := by
+  constructor
+  · intro i j off a b hij ha hb _ _ _
+    simpa using ha
+  · intro i j off r w hr _ _ _
+    simpa using hr
+
+/-- Predicate bundling the DRF side-condition required by `for_threads`. -/
+def PhasesSafe (g : Effects.Grade) : Prop :=
+  ∀ p ∈ Grade.phases g, WritesDisjointPhase p ∧ NoRAWIntraPhase p
+
+namespace PhasesSafe
+
+lemma seq {g h : Effects.Grade}
+    (hg : PhasesSafe g) (hh : PhasesSafe h) :
+    PhasesSafe (Grade.seq g h) := by
+  intro p hp
+  have hmem :
+      p ∈ Grade.phases g ++ Grade.phases h := by
+    simpa [Grade.seq, Grade.phases, Grade.toList_mul]
+      using hp
+  rcases List.mem_append.mp hmem with hpg | hph
+  · exact hg p hpg
+  · exact hh p hph
+
+lemma eps : PhasesSafe Grade.eps := by
+  intro p hp
+  have : False := by simpa [Grade.eps, Grade.phases] using hp
+  exact this.elim
+
+lemma singleton {p : Effects.Phase}
+    (hp : WritesDisjointPhase p ∧ NoRAWIntraPhase p) :
+    PhasesSafe (Word.ofList [p]) := by
+  intro q hq
+  simp [Grade.phases] at hq
+  rcases hq with rfl | hnil
+  · simpa using hp
+  · cases hnil
+
+lemma barrier : PhasesSafe Grade.ofBarrier := by
+  intro p hp
+  have hp' : p = { reads := [], writes := [] } := by
+    simp [Grade.ofBarrier, Grade.phases] at hp
+  subst hp'
+  simpa using emptyPhase_safe
+
+end PhasesSafe
+
 /-! ### Computable grade synthesis ----------------------------------------------------- -/
 
 mutual
