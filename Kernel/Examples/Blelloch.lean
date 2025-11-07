@@ -192,5 +192,76 @@ lemma hasGrade_forThreads_downsweep {Γ : Ctx} {body : Stmt}
   HasGrade Γ (.for_threads body) (gradeDownsweep off) :=
   HasGrade.g_for_threads hb (gradeDownsweep_safe off hoff)
 
+/-! ## Workgroup-level composition ------------------------------------------- -/
+
+namespace WG
+
+open Grade
+open Kernel.HasGrade
+
+/-- Sequential upsweep grade across a list of offsets. -/
+def gradeUpsweeps : List Nat → Grade
+| []      => Grade.eps
+| o :: os => Grade.seq (gradeUpsweep o) (gradeUpsweeps os)
+
+/-- Sequential downsweep grade across a list of offsets (processed right-to-left). -/
+def gradeDownsweeps : List Nat → Grade
+| []      => Grade.eps
+| o :: os => Grade.seq (gradeDownsweeps os) (gradeDownsweep o)
+
+/-- Full workgroup scan grade: upsweep stages followed by downsweep stages. -/
+def wgScanGrade (offs : List Nat) : Grade :=
+  Grade.seq (gradeUpsweeps offs) (gradeDownsweeps offs)
+
+/-- All offsets are strictly positive (the Blelloch arithmetic lemmas assume this). -/
+def AllPos (offs : List Nat) : Prop := ∀ o ∈ offs, 0 < o
+
+lemma gradeUpsweeps_safe {offs : List Nat}
+  (Hall : AllPos offs) :
+  PhasesSafe (gradeUpsweeps offs) := by
+  induction offs with
+  | nil =>
+      simpa [gradeUpsweeps] using PhasesSafe.eps
+  | cons o os ih =>
+      have ho : 0 < o := Hall o (by simp)
+      have hrest : AllPos os := by
+        intro k hk
+        exact Hall k (by simp [hk])
+      have hhead := gradeUpsweep_safe o ho
+      have htail := ih hrest
+      simpa [gradeUpsweeps] using PhasesSafe.seq hhead htail
+
+lemma gradeDownsweeps_safe {offs : List Nat}
+  (Hall : AllPos offs) :
+  PhasesSafe (gradeDownsweeps offs) := by
+  induction offs with
+  | nil =>
+      simpa [gradeDownsweeps] using PhasesSafe.eps
+  | cons o os ih =>
+      have ho : 0 < o := Hall o (by simp)
+      have hrest : AllPos os := by
+        intro k hk
+        exact Hall k (by simp [hk])
+      have htail := ih hrest
+      have hhead := gradeDownsweep_safe o ho
+      simpa [gradeDownsweeps] using PhasesSafe.seq htail hhead
+
+/-- Combined safety for the entire scan grade. -/
+lemma wgScanGrade_safe {offs : List Nat}
+  (Hall : AllPos offs) :
+  PhasesSafe (wgScanGrade offs) := by
+  have hUp := gradeUpsweeps_safe (offs := offs) Hall
+  have hDown := gradeDownsweeps_safe (offs := offs) Hall
+  simpa [wgScanGrade] using PhasesSafe.seq hUp hDown
+
+/-- Once a body synthesizes the composed grade, wrap it under `for_threads`. -/
+lemma hasGrade_forThreads_wgScan {Γ : Ctx} {body : Stmt}
+  {offs : List Nat} (Hall : AllPos offs)
+  (hb : HasGrade Γ body (wgScanGrade offs)) :
+  HasGrade Γ (.for_threads body) (wgScanGrade offs) :=
+  HasGrade.g_for_threads hb (wgScanGrade_safe Hall)
+
+end WG
+
 end Examples
 end Kernel

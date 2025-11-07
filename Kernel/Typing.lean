@@ -266,5 +266,102 @@ mutual
   | ⟨_, body⟩ :: rest => Grade.seq (gradeOf body) (gradeOfOffsets rest)
 end
 
+/-! ## Thread-free programs and split soundness ---------------------------------/
+
+mutual
+  /-- `ThreadsFree s` means `s` contains no `for_threads`. -/
+  def ThreadsFree : Stmt → Prop
+  | .skip               => True
+  | .let_ _ _           => True
+  | .load _ _           => True
+  | .store _ _          => True
+  | .atomicAdd _ _ _    => True
+  | .seq s t            => ThreadsFree s ∧ ThreadsFree t
+  | .ite _ body         => ThreadsFree body
+  | .barrier_wg         => True
+  | .barrier_st         => True
+  | .for_threads _      => False
+  | .for_offsets items  => ThreadsFreeOffsets items
+
+  /-- Companion predicate for offset families. -/
+  def ThreadsFreeOffsets : List (Nat × Stmt) → Prop
+  | []                  => True
+  | (_, s) :: rest      => ThreadsFree s ∧ ThreadsFreeOffsets rest
+end
+
+@[simp] lemma ThreadsFree_skip : ThreadsFree Stmt.skip := trivial
+@[simp] lemma ThreadsFree_barrier_wg : ThreadsFree Stmt.barrier_wg := trivial
+@[simp] lemma ThreadsFree_barrier_st : ThreadsFree Stmt.barrier_st := trivial
+@[simp] lemma ThreadsFree_for_threads {body} : ThreadsFree (.for_threads body) = False := rfl
+@[simp] lemma ThreadsFree_seq {s t} :
+    ThreadsFree (.seq s t) = (ThreadsFree s ∧ ThreadsFree t) := rfl
+@[simp] lemma ThreadsFree_ite {g body} :
+    ThreadsFree (.ite g body) = ThreadsFree body := rfl
+@[simp] lemma ThreadsFree_for_offsets {ks} :
+    ThreadsFree (.for_offsets ks) = ThreadsFreeOffsets ks := rfl
+
+@[simp] lemma ThreadsFreeOffsets_nil : ThreadsFreeOffsets [] := trivial
+@[simp] lemma ThreadsFreeOffsets_cons {k s rest} :
+    ThreadsFreeOffsets ((k, s) :: rest) = (ThreadsFree s ∧ ThreadsFreeOffsets rest) := rfl
+
+mutual
+  /-- Soundness for the thread-free fragment (no `for_threads`). -/
+  theorem gradeOf_sound_noThreads {Γ : Ctx} :
+      ∀ s, ThreadsFree s → HasGrade Γ s (gradeOf s)
+  | .skip,               _    => by simpa [gradeOf] using HasGrade.g_skip (Γ := Γ)
+  | .let_ _ _,           _    => by simpa [gradeOf] using HasGrade.g_let (Γ := Γ)
+  | .load _ _,           _    => by simpa [gradeOf] using HasGrade.g_load (Γ := Γ)
+  | .store _ _,          _    => by simpa [gradeOf] using HasGrade.g_store (Γ := Γ)
+  | .atomicAdd _ _ _,    _    => by simpa [gradeOf] using HasGrade.g_atomic (Γ := Γ)
+  | .seq s t,            hst  =>
+      by
+        have hpair : ThreadsFree s ∧ ThreadsFree t := by simpa [ThreadsFree] using hst
+        have hs := gradeOf_sound_noThreads (Γ := Γ) s hpair.left
+        have ht := gradeOf_sound_noThreads (Γ := Γ) t hpair.right
+        simpa [gradeOf] using HasGrade.g_seq hs ht
+  | .ite g body,         hb   =>
+      by
+        have hb' : ThreadsFree body := by simpa [ThreadsFree] using hb
+        have hbGrade := gradeOf_sound_noThreads (Γ := Γ) body hb'
+        simpa [gradeOf] using HasGrade.g_if_guard (Γ := Γ) (g := g) (s := body)
+          (gs := gradeOf body) hbGrade
+  | .barrier_wg,         _    => by simpa [gradeOf] using HasGrade.g_bar_wg (Γ := Γ)
+  | .barrier_st,         _    => by simpa [gradeOf] using HasGrade.g_bar_st (Γ := Γ)
+  | .for_threads body,   h    => False.elim (by simp at h)
+  | .for_offsets ks,     hks  =>
+      by
+        have hks' : ThreadsFreeOffsets ks := by simpa [ThreadsFree] using hks
+        have := gradeOfOffsets_sound_noThreads (Γ := Γ) ks hks'
+        simpa [gradeOf] using this
+
+  /-- Soundness helper for thread-free offset lists. -/
+  theorem gradeOfOffsets_sound_noThreads {Γ : Ctx} :
+      ∀ ks, ThreadsFreeOffsets ks → HasGrade Γ (.for_offsets ks) (gradeOfOffsets ks)
+  | [],        _               => by simpa [gradeOfOffsets] using HasGrade.g_for_offsets_nil (Γ := Γ)
+  | (k, s)::rest, hks          =>
+      by
+        have hpair : ThreadsFree s ∧ ThreadsFreeOffsets rest := by simpa [ThreadsFreeOffsets] using hks
+        have hs := gradeOf_sound_noThreads (Γ := Γ) s hpair.left
+        have ht := gradeOfOffsets_sound_noThreads (Γ := Γ) rest hpair.right
+        simpa [gradeOfOffsets] using
+          HasGrade.g_for_offsets_cons (Γ := Γ)
+            (k := k) (s := s) (ks := rest)
+            (gk := gradeOf s) (gks := gradeOfOffsets rest)
+            hs ht
+end
+
+/-- Convenience wrapper for `for_threads`: provide the DRF witness explicitly. -/
+lemma hasGrade_forThreads_of_safe {Γ : Ctx} {body : Stmt} {g : Effects.Grade}
+  (hb : HasGrade Γ body g) (hs : PhasesSafe g) :
+  HasGrade Γ (.for_threads body) g :=
+  HasGrade.g_for_threads hb hs
+
+/-- Single-use helper for the synthesized grade of `for_threads body`. -/
+lemma gradeOf_sound_forThreads {Γ : Ctx} {body : Stmt}
+  (hb : HasGrade Γ body (gradeOf body))
+  (hs : PhasesSafe (gradeOf body)) :
+  HasGrade Γ (.for_threads body) (gradeOf (.for_threads body)) := by
+  simpa [gradeOf] using hasGrade_forThreads_of_safe hb hs
+
 
 end Kernel
