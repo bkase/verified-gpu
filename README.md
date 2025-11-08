@@ -5,7 +5,7 @@
 - Quantale of languages: `Lang α := Set (Word α)` with concatenation and arbitrary joins
 - GPU “phase alphabet”: `Phase` (reads/writes/guards/space)
 - **Grades**: words over `Phase` (phase traces) with singleton **denotation** into the quantale
-- Per-phase obligations: pairwise-disjoint writes (`WritesDisjointPhase`) and no read-after-write within a phase (`NoRAWIntraPhase`)
+- Per-phase obligations: pairwise-disjoint writes (`WritesDisjointPhase`) and no cross-thread read-after-write within a phase (`NoRAWIntraPhase`)
 - Goal: Type-checking implies data-race freedom in workgroups; barriers adequate and, we hope, minimal
 - WGSL backend: `WGSL.Codegen` lowers the IR to WGSL, proves grade preservation, and produces a certified kernel via `CertifiedEmit_wgScan`
 
@@ -123,7 +123,7 @@ WGSL/                   -- WGSL AST, footprint/erasure logic, and certified emit
 
 - The concurrency rule checks per phase:
   - `WritesDisjointPhase`: distinct threads never write the same combination of memory space, base, and address
-  - `NoRAWIntraPhase`: within a single phase, a read does not alias any write
+- `NoRAWIntraPhase`: within a single phase, no read from one thread aliases a write from another thread
 
 ---
 
@@ -214,7 +214,7 @@ Typing is not just bookkeeping — it enforces absence of data races:
 
 - `gradeOf s = g` summarizes `s` as a phase trace with explicit barriers.
 - To type `.for_threads s`, rule `g_for_threads` requires `PhasesSafe g`.
-- `PhasesSafe g` packages per‑phase obligations: `WritesDisjointPhase` and the “no read‑after‑write within a phase” predicate `NoRAWIntraPhase` for every phase in `g`.
+- `PhasesSafe g` packages per‑phase obligations: `WritesDisjointPhase` and the “no cross-thread read‑after‑write within a phase” predicate `NoRAWIntraPhase` for every phase in `g`.
 - Barriers in `g` split epochs; safety is required within phases, and barriers provide the happens‑before relation between phases.
 - Therefore, if `Γ ⊢ .for_threads s ▷ g` holds, then running `s` in parallel workgroup threads has no data races within each epoch and between epochs separated by barriers.
 
@@ -310,7 +310,7 @@ and, independently:
    `wgScanGradeIR_normalizes` and then `gradeOf_wgScanStmt_normalizes`.
 
 4. **Obligations for absence of data races:** For each phase we discharge
-   `WritesDisjointPhase` and the “no read‑after‑write within a phase” predicate `NoRAWIntraPhase` using the affine lemmas (`Kernel/Lemmas/Affine.lean`), packaged into `…_safe` lemmas for upsweeps, downsweeps, and the whole scan. This gives `PhasesSafe (gradeOf …)`.
+   `WritesDisjointPhase` and the “no cross-thread read‑after‑write within a phase” predicate `NoRAWIntraPhase` using the affine lemmas (`Kernel/Lemmas/Affine.lean`), packaged into `…_safe` lemmas for upsweeps, downsweeps, and the whole scan. This gives `PhasesSafe (gradeOf …)`.
 
 5. **Concurrency rule:** With `PhasesSafe` in hand, apply `HasGrade.g_for_threads` to obtain
    `HasGrade Γ (.for_threads (wgScanStmt offs)) (gradeOf …)`.
@@ -365,7 +365,7 @@ lake build Kernel
 - **Normalizer fixed points (lists):** Abstract upsweep and downsweep chains are fixed points of `normalizeList`. See `gradeUpsweeps_normal_list` and `gradeDownsweeps_normal_list`.
 - **Barrier‑cut lemmas:** `normalizeList_barrier*` ensures runs of non‑empty phases fuse but never cross explicit barrier pairs.
 - **Equivalence between specification and intermediate representation:** The grade of the full scan in the IR normalizes to the spec grade (`wgScanGradeIR_normalizes`, `gradeOf_wgScanStmt_normalizes`).
-- **Discharging the obligations for absence of data races:** Per-phase `WritesDisjointPhase` and `NoRAWIntraPhase` are proven using affine index facts (`Kernel/Lemmas/Affine.lean`), packaged as `…_safe` lemmas.
+- **Discharging the obligations for absence of data races:** Per-phase `WritesDisjointPhase` and the cross-thread `NoRAWIntraPhase` are proven using affine index facts (`Kernel/Lemmas/Affine.lean`), packaged as `…_safe` lemmas.
 - **New end-to-end result:**
   `hasGrade_forThreads_wgScanStmt_upToNorm` (in `Kernel/Examples/Blelloch.lean`) establishes that the concrete Blelloch scan in the intermediate representation, when run under `for_threads`, synthesizes a grade whose normalized denotation equals the specification grade, and the `HasGrade` judgment ensures absence of data races per phase. This is the core certification that the implementation is race-free with the intended barriers.
 - **Certified WGSL emission:** `WGSL.Codegen` lowers `Kernel.Stmt` programs to a tiny WGSL subset, proves grade erasure preserves `Kernel.gradeOf`, and packages the existing scan proof into `CertifiedEmit_wgScan`. That theorem states the emitted WGSL for `wgScanStmt offs` is race-free (via `HasGrade`) and its grade matches the spec up to normalization, giving a turnkey artifact for downstream tooling.
@@ -403,7 +403,7 @@ With the core absence‑of‑data‑races and normalization story in place, the 
 
 - Obligations:
   - `WritesDisjointPhase : Phase → Prop`
-  - `NoRAWIntraPhase    : Phase → Prop`
+  - `NoRAWIntraPhase    : Phase → Prop` (cross-thread RAW forbidden within a phase)
 
 - Concurrency rule:
   - `HasGrade.g_for_threads : (∀ p ∈ phases g, …) → HasGrade Γ (.for_threads body) g`

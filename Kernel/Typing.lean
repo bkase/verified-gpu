@@ -189,7 +189,7 @@ lemma emptyPhase_safe :
   constructor
   · intro i j off a b hij ha hb _ _ _
     simp at ha
-  · intro i j off r w hr _ _ _
+  · intro i j off r w hr _ _ _ _
     simp at hr
 
 /-- Predicate bundling the DRF side-condition required by `for_threads`. -/

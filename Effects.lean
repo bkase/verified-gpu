@@ -576,6 +576,7 @@ def WritesDisjointPhase (phase : Phase) : Prop :=
 
 /-- Same idea for *no RAW hazard inside the same phase*. Often implied by
     disjoint writes plus “reads come from earlier phases,” but leave a hook. -/
+-- Cross-thread RAW only: allow a thread to read and later write the same address.
 def NoRAWIntraPhase (phase : Phase) : Prop :=
   ∀ (i j : Nat) (off : Int) {r w : Access},
     r ∈ phase.reads →
@@ -583,6 +584,7 @@ def NoRAWIntraPhase (phase : Phase) : Prop :=
     -- if both active, they must not alias:
     (i % r.guard.step = r.guard.phase % r.guard.step) →
     (j % w.guard.step = w.guard.phase % w.guard.step) →
+    i ≠ j →
     r.base ≠ w.base ∨
     r.idx.eval (Int.ofNat i) off ≠ w.idx.eval (Int.ofNat j) off
 

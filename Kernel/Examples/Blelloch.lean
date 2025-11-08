@@ -84,7 +84,7 @@ lemma upsweep_WritesDisjoint (off : Nat) :
 /-- Upsweep phase has no intra-phase RAW hazards when `off > 0`. -/
 lemma upsweep_NoRAWIntra (off : Nat) (hoff : 0 < off) :
   NoRAWIntraPhase (upsweepPhase off) := by
-  intro i j offV r w hr hw hi hj
+  intro i j offV r w hr hw hi hj hij
   have hr' :
       r = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) := by
     simpa [upsweepPhase] using hr
@@ -126,7 +126,7 @@ lemma downsweep_WritesDisjoint (off : Nat) (hoff : 0 < off) :
 /-- Downsweep has no reads in this phase, so NoRAW is immediate. -/
 lemma downsweep_NoRAWIntra (off : Nat) :
   NoRAWIntraPhase (downsweepPhase off) := by
-  intro i j offV r w hr _ _ _
+  intro i j offV r w hr _ _ _ _
   cases hr
 
 /-- Package upsweep safety facts. -/
@@ -1218,7 +1218,7 @@ private lemma read_only_safe (a : Access) :
     constructor
     · intro i j off a' b' hij ha hb _ _ _
       simp at hb
-    · intro i j off r w hr hw _ _
+    · intro i j off r w hr hw _ _ _
       simp at hw
 
 /-- Write-only single phase for upsweep’s right target is safe across threads. -/
@@ -1237,7 +1237,7 @@ private lemma write_only_upsweep_safe (off : Nat) :
       subst ha'
       subst hb'
       simpa [wgBuf, Aff2.eval] using upsweep_index_distinct off hij
-    · intro i j offV r w hr _ _ _
+    · intro i j offV r w hr _ _ _ _
       simp at hr
 
 /-- Left-hand downsweep write is safe. -/
@@ -1254,7 +1254,7 @@ private lemma write_only_down_left_safe (off : Nat) :
       subst ha'
       subst hb'
       simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).left
-    · intro i j offV r w hr _ _ _
+    · intro i j offV r w hr _ _ _ _
       simp at hr
 
 /-- Right-hand downsweep write is safe. -/
@@ -1271,7 +1271,7 @@ private lemma write_only_down_right_safe (off : Nat) :
       subst ha'
       subst hb'
       simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).right
-    · intro i j offV r w hr _ _ _
+    · intro i j offV r w hr _ _ _ _
       simp at hr
 
 /-- Each upsweep IR stage is safe: read, then write, then barrier. -/
