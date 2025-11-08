@@ -1515,7 +1515,7 @@ lemma wgScanStmt_upToNorm (offs) :
     wgScanGradeIR_normalizes,
     wgScanGrade_normal]
 
-lemma hasGrade_forThreads_wgScanStmt_upToNorm {Γ} (offs) :
+lemma hasGrade_forThreads_wgScanStmt_upToNorm {Γ} (offs) :               
   HasGrade Γ (.for_threads (wgScanStmt offs))
            (gradeOf (wgScanStmt offs))
   ∧ gradeOf (wgScanStmt offs) ≈ wgScanGrade offs :=

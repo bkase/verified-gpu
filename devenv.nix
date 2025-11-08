@@ -5,6 +5,10 @@
     pkgs.git
     pkgs.elan
     pkgs.nodejs_20
+    pkgs.uv
+    pkgs.ripgrep
+    pkgs.fd
+    pkgs.bun
   ];
 
   # Environment variables for Lean (elan will manage toolchain)

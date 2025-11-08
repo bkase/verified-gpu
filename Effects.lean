@@ -15,14 +15,14 @@ inductive Space | workgroup | storage deriving DecidableEq, Repr
 structure Guard where
   step  : Nat := 1
   phase : Nat := 0
-deriving DecidableEq, Repr
+deriving DecidableEq, Repr, Inhabited
 
 /-- A tiny affine index in (tid,off): i = a_tid*tid + a_off*off + b. -/
 structure Aff2 where
   a_tid : Int := 1
   a_off : Int := 0
   b     : Int := 0
-deriving DecidableEq, Repr
+deriving DecidableEq, Repr, Inhabited
 
 def Aff2.eval (f : Aff2) (tid off : Int) : Int :=
   f.a_tid * tid + f.a_off * off + f.b
@@ -40,6 +40,10 @@ structure Phase where
   reads  : List Access := []
   writes : List Access := []
 deriving DecidableEq, Repr
+
+@[ext] lemma Phase.ext {p q : Phase}
+    (hreads : p.reads = q.reads) (hwrites : p.writes = q.writes) : p = q := by
+  cases p; cases q; cases hreads; cases hwrites; rfl
 
 namespace Phase
 
@@ -218,6 +222,8 @@ lemma normalizeList_loop_some_append (p : Phase) (ps acc : List Phase) :
     Empty phases act as *hard* cuts and are preserved. -/
 def normalizeList (xs : List Phase) : List Phase :=
   normalizeList.loop none xs []
+
+@[simp] lemma normalizeList_nil : normalizeList ([] : List Phase) = [] := rfl
 
 @[simp] lemma list_singleton_append {α} (x : α) (xs : List α) :
     [x] ++ xs = x :: xs := rfl
@@ -520,11 +526,13 @@ lemma denote_seq (g h : Grade) :
 
 lemma denote_unit : denote unit = (1 : PhaseLang) := by
   ext w; constructor <;> intro hw
-  · have : w = (1 : Grade) := by
-      simpa [denote, unit, Set.mem_singleton_iff] using hw
-    exact mem_one_lang.mpr this
+  ·
+    have hw₁ := hw
+    simp [denote, unit, Set.mem_singleton_iff] at hw₁
+    exact mem_one_lang.mpr hw₁
   · have : w = (1 : Grade) := mem_one_lang.mp hw
-    simp [denote, unit, Set.mem_singleton_iff, this]
+    subst this
+    simp [denote, unit, Set.mem_singleton_iff]
 
 /-- Append a write access to the *current* phase. -/
 def addWrite (a : Access) (g : Grade) : Grade :=

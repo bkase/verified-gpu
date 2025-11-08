@@ -14,5 +14,7 @@ lean_lib Effects
 
 lean_lib Kernel
 
+lean_lib WGSL
+
 lean_lib Tests where
   roots := #[`Tests.GradeEval]

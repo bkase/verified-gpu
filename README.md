@@ -5,8 +5,9 @@
 - Quantale of languages: `Lang α := Set (Word α)` with concatenation and arbitrary joins
 - GPU “phase alphabet”: `Phase` (reads/writes/guards/space)
 - **Grades**: words over `Phase` (phase traces) with singleton **denotation** into the quantale
-- Per‑phase obligations: pairwise‑disjoint writes (`WritesDisjointPhase`) and no read‑after‑write within a phase (`NoRAWIntraPhase`)
-- Goal: Type‑checking implies data‑race freedom in workgroups; barriers adequate and, we hope, minimal
+- Per-phase obligations: pairwise-disjoint writes (`WritesDisjointPhase`) and no read-after-write within a phase (`NoRAWIntraPhase`)
+- Goal: Type-checking implies data-race freedom in workgroups; barriers adequate and, we hope, minimal
+- WGSL backend: `WGSL.Codegen` lowers the IR to WGSL, proves grade preservation, and produces a certified kernel via `CertifiedEmit_wgScan`
 
 ---
 
@@ -59,6 +60,7 @@ lake build
 lake build Effects   # phase alphabet + grades + normalization
 lake build Kernel    # Syntax, Typing, Lemmas (e.g., affine facts)
 lake build Tests     # sample programs / grade synthesis smoke tests
+lake build WGSL      # WGSL AST + footprint + certified emitter
 ```
 
 Repository layout (high‑level):
@@ -71,10 +73,14 @@ Kernel/                 -- Core intermediate representation close to the WGSL, a
   Typing.lean           -- Graded typing rules and synthesizer (`gradeOf`)
   Lemmas/               -- Reusable arithmetic and guard reasoning facts
     Affine.lean         -- Affine index lemmas for Blelloch‑style scans
-  Examples/             -- Drop‑in proof patterns for specific kernels
-    Blelloch.lean       -- Upsweep/downsweep and end‑to‑end scan grade proofs
+  Examples/             -- Drop-in proof patterns for specific kernels
+    Blelloch.lean       -- Upsweep/downsweep and end-to-end scan grade proofs
 Tests/                  -- Quick grade synthesis checks
-  GradeEval.lean        -- End‑to‑end sample touching every statement form
+  GradeEval.lean        -- End-to-end sample touching every statement form
+WGSL/                   -- WGSL AST, footprint/erasure logic, and certified emitter
+  AST.lean              -- Minimal WGSL syntax + pretty-printer
+  Footprint.lean        -- WGSL-side phases/grades with erasure into Effects.Grade
+  Codegen.lean          -- IR → WGSL lowering, grade preservation, CertifiedEmit_wgScan
 ```
 
 ---
@@ -196,7 +202,7 @@ Typing is not just bookkeeping — it enforces absence of data races:
 
 ### What the theorem says
 
-At the heart of the repository we now have the following end‑to‑end result for the **concrete intermediate representation** of the workgroup Blelloch scan:
+At the heart of the repository we now have the following end-to-end result for the **concrete intermediate representation** of the workgroup Blelloch scan:
 
 ```lean
 lemma hasGrade_forThreads_wgScanStmt_upToNorm {Γ} (offs) :
@@ -316,6 +322,12 @@ A few helpful commands while browsing the files:
 #check WG.IR.wgScanGradeIR_safe
 #check Kernel.PhasesSafe.barrier
 #check Kernel.Lemmas.upsweep_index_distinct
+
+-- WGSL backend and certificate (WGSL/Codegen.lean)
+#check WGSL.buildModule
+#check WGSL.PP.emit
+#check WGSL.CertifiedEmit_wgScan
+#eval WGSL.PP.emit (WGSL.buildModule default (Kernel.Examples.WG.IR.wgScanStmt [1,2,4,8]))
 ```
 
 To build everything:
@@ -331,9 +343,10 @@ lake build Kernel
 - **Normalizer fixed points (lists):** Abstract upsweep and downsweep chains are fixed points of `normalizeList`. See `gradeUpsweeps_normal_list` and `gradeDownsweeps_normal_list`.
 - **Barrier‑cut lemmas:** `normalizeList_barrier*` ensures runs of non‑empty phases fuse but never cross explicit barrier pairs.
 - **Equivalence between specification and intermediate representation:** The grade of the full scan in the IR normalizes to the spec grade (`wgScanGradeIR_normalizes`, `gradeOf_wgScanStmt_normalizes`).
-- **Discharging the obligations for absence of data races:** Per‑phase `WritesDisjointPhase` and `NoRAWIntraPhase` are proven using affine index facts (`Kernel/Lemmas/Affine.lean`), packaged as `…_safe` lemmas.
-- **New end‑to‑end result:**
-  `hasGrade_forThreads_wgScanStmt_upToNorm` (in `Kernel/Examples/Blelloch.lean`) establishes that the concrete Blelloch scan in the intermediate representation, when run under `for_threads`, synthesizes a grade whose normalized denotation equals the specification grade, and the `HasGrade` judgment ensures absence of data races per phase. This is the core certification that the implementation is race‑free with the intended barriers.
+- **Discharging the obligations for absence of data races:** Per-phase `WritesDisjointPhase` and `NoRAWIntraPhase` are proven using affine index facts (`Kernel/Lemmas/Affine.lean`), packaged as `…_safe` lemmas.
+- **New end-to-end result:**
+  `hasGrade_forThreads_wgScanStmt_upToNorm` (in `Kernel/Examples/Blelloch.lean`) establishes that the concrete Blelloch scan in the intermediate representation, when run under `for_threads`, synthesizes a grade whose normalized denotation equals the specification grade, and the `HasGrade` judgment ensures absence of data races per phase. This is the core certification that the implementation is race-free with the intended barriers.
+- **Certified WGSL emission:** `WGSL.Codegen` lowers `Kernel.Stmt` programs to a tiny WGSL subset, proves grade erasure preserves `Kernel.gradeOf`, and packages the existing scan proof into `CertifiedEmit_wgScan`. That theorem states the emitted WGSL for `wgScanStmt offs` is race-free (via `HasGrade`) and its grade matches the spec up to normalization, giving a turnkey artifact for downstream tooling.
 
 ---
 
@@ -341,17 +354,11 @@ lake build Kernel
 
 With the core absence‑of‑data‑races and normalization story in place, the remaining steps are mechanical and pave the path to execution:
 
-1. **WGSL backend:** Implement a pretty‑printer from `Kernel.Stmt` to the WGSL preserving
-   - storage vs. workgroup spaces,
-   - explicit barriers (workgroup/storage),
-   - guard semantics (`tid % step = phase`).
-     A faithfulness lemma would relate the emitted WGSL code’s syntactic barriers and indexed accesses back to the Lean intermediate‑representation grade.
+1. **Host scaffolding and execution:** Provide a small runtime to upload buffers, dispatch the certified WGSL kernel (`WGSL.PP.emit (WGSL.buildModule …)`), and validate results (for example, compare against a CPU scan).
 
-2. **Host scaffolding and execution:** Provide a small runtime to upload buffers, dispatch the kernel, and validate results (for example, compare against a central processing unit scan).
+2. **Pipeline integration / artifacts:** Hook the emitter into the build so a concrete WGSL file (and maybe SPIR-V) is produced alongside the Lean proof, making it easy to feed into `wgpu`/`naga` tooling.
 
-3. **Extraction of the certified kernel:** Integrate the emission with the proven `wgScanStmt` instance, so the artifact we run is exactly the one that satisfies `hasGrade_forThreads_wgScanStmt_upToNorm`.
-
-4. **(Optional) Minimality:** Prove that removing any barrier in the specification or the intermediate representation increases the normalized word or introduces a data race (barrier optimality).
+3. **(Optional) Minimality:** Prove that removing any barrier in the specification or the intermediate representation increases the normalized word or introduces a data race (barrier optimality).
 
 ---
 
@@ -389,3 +396,4 @@ _Pointers for code archeology_
 - `Kernel/Typing.lean`: typing rules, synthesis `gradeOf`, `PhasesSafe`
 - `Kernel/Lemmas/Affine.lean`: arithmetic facts for disjointness under guards
 - `Kernel/Examples/Blelloch.lean`: specification and intermediate representation of the Blelloch scan, normalization and absence‑of‑data‑races proofs (including the spotlight lemma)
+From there, the WGSL backend reuses the exact same inhabitant: `CertifiedEmit_wgScan` (in `WGSL/Codegen.lean`) states that the pretty-printed WGSL module produced from `wgScanStmt offs` carries the erased grade of the IR proof and that grade still matches the spec up to normalization. In short, the code you can hand to a WebGPU runtime is the one that satisfies the theorem above.

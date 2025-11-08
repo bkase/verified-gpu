@@ -99,27 +99,19 @@ inductive HasGrade : Ctx → Kernel.Stmt → Effects.Grade → Prop
 | g_let {Γ x e} :
     HasGrade Γ (.let_ x e) Grade.eps
 
-/-- [T-Load-wg/st]
+/-- [T-Load]
     ─────────────────────────────────────────
-    Γ ⊢ load loc dst ▷ read(loc)
-    where read(loc) ≜ `Grade.ofRead (asRead loc guardAll)`
+    Γ ⊢ load loc dst ▷ Grade.ofRead (asRead loc guardAll)
 -/
 | g_load {Γ loc dst} :
-    HasGrade Γ (.load loc dst)
-      (match loc.space with
-       | .workgroup => Grade.ofRead (asRead loc guardAll)
-       | .storage   => Grade.ofRead (asRead loc guardAll))
+    HasGrade Γ (.load loc dst) (Grade.ofRead (asRead loc guardAll))
 
-/-- [T-Store-wg/st]
+/-- [T-Store]
     ──────────────────────────────────────────
-    Γ ⊢ store loc rhs ▷ write(loc)
-    where write(loc) ≜ `Grade.ofWrite (asWrite loc guardAll)`
+    Γ ⊢ store loc rhs ▷ Grade.ofWrite (asWrite loc guardAll)
 -/
 | g_store {Γ loc rhs} :
-    HasGrade Γ (.store loc rhs)
-      (match loc.space with
-       | .workgroup => Grade.ofWrite (asWrite loc guardAll)
-       | .storage   => Grade.ofWrite (asWrite loc guardAll))
+    HasGrade Γ (.store loc rhs) (Grade.ofWrite (asWrite loc guardAll))
 
 /-- [T-Atomic] (modeled as effect-neutral)
     ───────────────────────────────
@@ -254,13 +246,9 @@ mutual
   | .skip                => Grade.eps
   | .let_ _ _            => Grade.eps
   | .load loc _          =>
-      match loc.space with
-      | .workgroup => Grade.ofRead (asRead loc guardAll)
-      | .storage   => Grade.ofRead (asRead loc guardAll)
+      Grade.ofRead (asRead loc guardAll)
   | .store loc _         =>
-      match loc.space with
-      | .workgroup => Grade.ofWrite (asWrite loc guardAll)
-      | .storage   => Grade.ofWrite (asWrite loc guardAll)
+      Grade.ofWrite (asWrite loc guardAll)
   | .atomicAdd _ _ _     => Grade.eps
   | .seq s t             => Grade.seq (gradeOf s) (gradeOf t)
   | .ite g s             => stampGrade (gradeOf s) g
@@ -312,6 +300,12 @@ end
 @[simp] lemma ThreadsFreeOffsets_nil : ThreadsFreeOffsets [] := trivial
 @[simp] lemma ThreadsFreeOffsets_cons {k s rest} :
     ThreadsFreeOffsets ((k, s) :: rest) = (ThreadsFree s ∧ ThreadsFreeOffsets rest) := rfl
+
+@[simp] lemma gradeOf_load {loc dst} :
+    gradeOf (.load loc dst) = Grade.ofRead (asRead loc guardAll) := rfl
+
+@[simp] lemma gradeOf_store {loc rhs} :
+    gradeOf (.store loc rhs) = Grade.ofWrite (asWrite loc guardAll) := rfl
 
 mutual
   /-- Soundness for the thread-free fragment (no `for_threads`). -/

@@ -67,6 +67,10 @@ instance : One (Word α) := ⟨⟨[]⟩⟩
 
 @[simp] lemma toList_one : ((1 : Word α) : List α) = [] := rfl
 
+@[simp] lemma ofList_nil : (ofList ([] : List α) : Word α) = (1 : Word α) := rfl
+
+@[simp] lemma mk_nil : (Word.mk ([] : List α)) = (1 : Word α) := rfl
+
 instance : Semigroup (Word α) where
   mul_assoc := by
     intro w₁ w₂ w₃
