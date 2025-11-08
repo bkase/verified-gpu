@@ -109,6 +109,77 @@ Our typing judgment has the shape `Γ ⊢ s ▷ g`: “In environment `Γ`, stat
 
 The synthesis function `gradeOf : Stmt → Effects.Grade` computes a conservative phase trace and is sound for the thread‑free fragment; the `for_threads` rule imposes the data‑race‑freedom side‑conditions via `PhasesSafe g`.
 
+### Rule reference (inference form)
+
+Abbreviations:
+
+- `ε` = empty grade (`Grade.eps`)
+- `g ⊙ h` = sequential composition (`Grade.seq g h`)
+- `B(g)` = append a phase boundary (`g ⊙ Grade.ofBarrier`)
+- `R(loc)` / `W(loc)` = singleton read/write footprints from `loc`
+- `stamp(g,guard)` = attach `guard` to all accesses in `g`
+
+**Basic constructs**
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{skip} \triangleright \varepsilon}\quad\text{(T-Skip)}
+$$
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{let}\ x:=e \triangleright \varepsilon}\quad\text{(T-Let)}
+$$
+
+**Memory effects**
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{load}\;loc\;dst \triangleright R(loc)}\quad\text{(T-Load)}
+$$
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{store}\;loc\;rhs \triangleright W(loc)}\quad\text{(T-Store)}
+$$
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{atomicAdd}\;loc\;rhs\;dst \triangleright \varepsilon}\quad\text{(T-Atomic)}
+$$
+
+**Composition and barriers**
+
+$$
+\frac{\Gamma \vdash s \triangleright g \quad \Gamma \vdash t \triangleright h}{\Gamma \vdash s ; t \triangleright g \odot h}\quad\text{(T-Seq)}
+$$
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{workgroupBarrier} \triangleright B(\varepsilon)}\quad\text{(T-Barrier-WG)}
+$$
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{storageBarrier} \triangleright B(\varepsilon)}\quad\text{(T-Barrier-ST)}
+$$
+
+**Guards and families**
+
+$$
+\frac{\Gamma \vdash s \triangleright g}{\Gamma \vdash \texttt{if}\ (guard)\ \{s\} \triangleright stamp(g,\,guard)}\quad\text{(T-IfGuard)}
+$$
+
+$$
+\frac{\ }{\Gamma \vdash \texttt{for\\_offsets}\;[] \triangleright \varepsilon}\quad\text{(T-ForOffsets-Nil)}
+$$
+
+$$
+\frac{\Gamma \vdash s \triangleright g_1 \quad \Gamma \vdash \texttt{for\\_offsets}\;ks \triangleright g_2}{\Gamma \vdash \texttt{for\\_offsets}\;((k,s)::ks) \triangleright g_1 \odot g_2}\quad\text{(T-ForOffsets-Cons)}
+$$
+
+**Parallel threads (crux)**
+
+$$
+\frac{\Gamma \vdash body \triangleright g \quad \forall p \in \mathrm{phases}(g),\;\mathrm{WritesDisjointPhase}(p) \wedge \mathrm{NoRAWIntraPhase}(p)}{\Gamma \vdash \texttt{for\\_threads}\ \{body\} \triangleright g}\quad\text{(T-ForThreads)}
+$$
+
+- `phases(g)` is `Grade.phases g` (exposed in Lean for the side-condition)
+- `WritesDisjointPhase` / `NoRAWIntraPhase` come from `Effects.lean`
+
 ### How typing yields absence of data races
 
 Typing is not just bookkeeping — it enforces absence of data races:
