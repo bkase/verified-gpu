@@ -1,6 +1,6 @@
 # VerifiedGPU: Graded-Effect Semantics for Race‑Free WebGPU Kernels (Lean 4)
 
-**VerifiedGPU** is a Lean 4 project that formalizes a lightweight kernel model close to the WebGPU Shading Language (WGSL), and uses a **language quantale** to reason compositionally about absence of data races and about barrier placement. WGSL is the shading language for the modern web graphics standard called [WebGPU](https://en.wikipedia.org/wiki/WebGPU). The first target demonstration is a verified **Blelloch‑style scan** ([exclusive prefix sum](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)) with workgroup barriers that are intended to be optimal, plus a path to certified WGSL emission.
+**VerifiedGPU** is a Lean 4 project that formalizes a lightweight kernel model close to the WebGPU Shading Language (WGSL), and uses a **language quantale** to reason compositionally about absence of data races and about barrier placement. WGSL is the shading language for the modern web graphics standard called [WebGPU](https://en.wikipedia.org/wiki/WebGPU). The first target demonstration is a verified **Blelloch‑style scan** ([exclusive prefix sum](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)) with workgroup barriers that are intended to be optimal, plus a path to certified WGSL emission. You can run the certified WGSL in the browser via the WebGPU harness at [bkase.github.io/verified-gpu](https://bkase.github.io/verified-gpu).
 
 - Quantale of languages: `Lang α := Set (Word α)` with concatenation and arbitrary joins
 - GPU “phase alphabet”: `Phase` (reads/writes/guards/space)
@@ -243,28 +243,24 @@ Typing is not just bookkeeping — it enforces absence of data races:
 
 ---
 
-## Theorem spotlight: end-to-end data-race freedom for the concrete Blelloch scan
+## Theorem spotlight: certified WGSL Blelloch scan (end-to-end)
 
-### What the theorem says
-
-At the heart of the repository we now have the following end-to-end result for the **concrete intermediate representation** of the workgroup Blelloch scan:
+### What the theorem says (now, for the emitted WGSL)
 
 ```lean
-lemma hasGrade_forThreads_wgScanStmt_upToNorm {Γ} (offs) :
-  HasGrade Γ (.for_threads (wgScanStmt offs))
-           (gradeOf (wgScanStmt offs))
-  ∧ gradeOf (wgScanStmt offs) ≈ wgScanGrade offs :=
-⟨ hasGrade_forThreads_wgScanStmt (Γ := Γ) (offs := offs)
- , wgScanStmt_upToNorm offs ⟩
+/-- Certified WGSL emission for the Blelloch scan. -/
+theorem WGSL.CertifiedEmit_wgScan {Γ} (env : WGSL.Env) (offs : List Nat) :
+    let s := Kernel.Examples.WG.IR.wgScanStmt offs;
+    HasGrade Γ (.for_threads s) (WGSL.eraseGrade (WGSL.gradeOfGen env s)) ∧
+    WGSL.eraseGrade (WGSL.gradeOfGen env s) ≈ Kernel.Examples.WG.wgScanGrade offs
 ```
 
-Plain language summary. For any nonempty list of strictly positive offsets `offs` (the usual Blelloch schedule), the concrete statement `wgScanStmt offs`:
+**Plain language summary.** For any offsets list `offs` (e.g. the usual Blelloch schedule) and any WGSL codegen environment `env` (names/bindings/sizes), let `s := WG.IR.wgScanStmt offs`. Then:
 
-1. Type‑checks under `for_threads` with synthesized grade `gradeOf (wgScanStmt offs)`. Type‑checking via `HasGrade …` enforces the per‑phase data‑race‑freedom side‑conditions (pairwise‑disjoint writes and no read‑after‑write within a phase), so the kernel is race‑free by construction between consecutive barriers.
+1. The **emitted WGSL program** (obtained by lowering `s` with `gradeOfGen` and erasing back to effects with `eraseGrade`) **type-checks under `for_threads`** with grade `eraseGrade (gradeOfGen env s)`. By rule `g_for_threads`, this enforces the per-phase DRF side-conditions (pairwise-disjoint writes; no cross-thread RAW within a phase), so the kernel is race-free between barriers.
+2. The **erased WGSL grade matches the abstract specification** `WG.wgScanGrade offs` **up to normalization** (`≈`), i.e. after fusing adjacent non-empty phases without crossing explicit barriers.
 
-2. The synthesized grade, when interpreted up to normalization (`≈` denotes equality of singleton denotations), is extensionally equal to the abstract specification grade `wgScanGrade offs`. In other words, the barrier structure and read/write footprints of the actual intermediate‑representation implementation coincide with the specification after fusing runs of non‑empty phases (but never across explicit barrier cuts).
-
-Combined, this is a full “implementation refines specification” plus “absence of data races” result: the concrete Blelloch scan that we will emit to the WebGPU Shading Language is provably race‑free, with the intended barrier placement and no hidden phase reordering beyond deterministic normalization.
+Together, this is an **implementation + codegen certificate**: the WGSL you run is race-free with the intended barrier structure, and it agrees with the spec grade modulo explicit, semantics-preserving normalization.
 
 ### Why “up to normalization”?
 
@@ -277,38 +273,41 @@ Thus `g ≈ h` means `{normalize g} = {normalize h}` as languages. This gives th
 
 ### Where the pieces live (code map)
 
-- **Intermediate representation of the scan (concrete program):**
+- **Intermediate representation of the scan (concrete program & safety facts):**
   `Kernel/Examples/Blelloch.lean` → `namespace WG.IR` (here `IR` is short for “intermediate representation”)
   - `wgScanStmt` : builds the sequence of upsweeps, then downsweeps, each ending in a barrier.
-  - `gradeOf_wgScanStmt` : computes its grade by syntax‑directed synthesis.
+  - `gradeOf_wgScanStmt` : syntax-directed grade for the IR.
+  - `hasGrade_forThreads_wgScanStmt_upToNorm` : IR under `for_threads` + normalization equality to the spec.
 
 - **Specification grade (abstract target):**
   `Kernel/Examples/Blelloch.lean` → `namespace WG`
   - `wgScanGrade` : `gradeUpsweeps offs ⋆ gradeDownsweeps offs`.
   - `wgScanGrade_safe` : all phases in the specification are proven safe for absence of data races.
 
-- **Bridging IR ↔ Spec (normalization and safety):**
-  - `WG.IR.wgScanGradeIR_normalizes` : the IR grade normalizes to the spec grade.
-  - `WG.IR.wgScanGradeIR_safe` : phases of the IR grade are proven safe for absence of data races.
-  - `gradeUpsweepIR_normalizes`, `gradeDownsweepIR_normalizes` : per‑stage equalities.
+- **Bridging IR ↔ Spec (normalization + safety):**
+  - `gradeUpsweepIR_normalizes`, `gradeDownsweepIR_normalizes` : per-stage normalization equalities.
+  - `WG.IR.wgScanGradeIR_normalizes` : IR grade normalizes to the spec.
+  - `WG.IR.wgScanGradeIR_safe` : IR phases are DRF-safe.
 
 - **Arithmetic and affine lemmas discharging the obligations for absence of data races:**
   `Kernel/Lemmas/Affine.lean`
   - `upsweep_index_distinct`, `downsweep_index_distinct_both`, …
   - Guard reasoning: `upsweep_guard_mixed_targets_ne`, and related lemmas.
 
-- **Concurrency rule and the data‑race‑freedom check:**
+- **WGSL backend (lowering + grade preservation + certificate):**
+  `WGSL/Codegen.lean`
+  - `gradeOfGen` and `eraseGrade` : WGSL-side footprint/erasure.
+  - `emit_grade_eq_IR` and `cg_preserves_grade` : erasure preserves `Kernel.gradeOf` for the IR.
+  - `CertifiedEmit_wgScan` : **this** theorem — composes the IR certificate with codegen to certify the emitted WGSL.
+
+- **Concurrency rule and the data-race-freedom check (shared):**
   `Kernel/Typing.lean`
   - `HasGrade.g_for_threads` : requires `PhasesSafe g`.
   - `PhasesSafe.seq`, `PhasesSafe.barrier` : compositional safety facts.
 
-- **Final statement (this spotlight):**
-  `Kernel/Examples/Blelloch.lean` → bottom of `namespace WG.IR`
-  - `hasGrade_forThreads_wgScanStmt_upToNorm` (the two‑part conjunction).
-
 ### Proof sketch and how the parts compose
 
-**Pipeline (conceptual):**
+**Pipeline (conceptual, end-to-end):**
 
 ```
           (concrete intermediate representation)     (abstract specification)
@@ -324,55 +323,28 @@ and, independently:
       └── by `g_for_threads` plus lemmas establishing absence of data races (affine reasoning per phase)
 ```
 
-1. **Compute grades:** `gradeOf` over the concrete intermediate representation (`wgScanStmt`) produces a grade whose list form is a concatenation of (guarded read/write phases) each followed by an explicit barrier.
+1. **IR certificate:** Prove `.for_threads (wgScanStmt offs)` with synthesized grade and show that grade normalizes to the spec (`hasGrade_forThreads_wgScanStmt_upToNorm`), using the affine lemmas plus the barrier-cut normalizer.
+2. **Codegen preservation:** Show that WGSL lowering/erasure preserves the IR grade (`emit_grade_eq_IR`, `cg_preserves_grade`).
+3. **Compose:** Conclude `CertifiedEmit_wgScan`: the *emitted WGSL* has the `HasGrade` judgment and matches the spec up to normalization.
 
-2. **Local collapses:** At each stage, we show that the two consecutive non‑empty phases fuse to the single abstract stage under list‑level normalization (`normalizeList_stage_pair`). This yields `gradeUpsweepIR_normalizes` and `gradeDownsweepIR_normalizes`.
+**What this buys us.** The *artifact you run* (WGSL) is:
 
-3. **Global collapse:** Using the “cut at the barrier” lemmas
-   (`normalizeList_barrier_middle_append`, `…_append_barrier_right`) we normalize the whole IR word into the abstract word:
-   `wgScanGradeIR_normalizes` and then `gradeOf_wgScanStmt_normalizes`.
-
-4. **Obligations for absence of data races:** For each phase we discharge
-   `WritesDisjointPhase` and the “no cross-thread read‑after‑write within a phase” predicate `NoRAWIntraPhase` using the affine lemmas (`Kernel/Lemmas/Affine.lean`), packaged into `…_safe` lemmas for upsweeps, downsweeps, and the whole scan. This gives `PhasesSafe (gradeOf …)`.
-
-5. **Concurrency rule:** With `PhasesSafe` in hand, apply `HasGrade.g_for_threads` to obtain
-   `HasGrade Γ (.for_threads (wgScanStmt offs)) (gradeOf …)`.
-
-6. **Combine:** Conjoin the `HasGrade` judgment with the normalization equality to the specification:
-   `hasGrade_forThreads_wgScanStmt_upToNorm`.
-
-**What this buys us.** The concrete implementation has:
-
-- **Correct barrier structure** (explicit and preserved),
-- **Per‑phase absence of data races** when executed in parallel under `for_threads`,
-- **Behavioral equality** (up to normalization) to the abstract scan grade.
+- **Race-free per phase** under `for_threads` (DRF side-conditions hold).
+- **Barrier-faithful** (barriers are explicit and never crossed by normalization).
+- **Behaviorally equal** to the abstract scan grade up to normalization.
 
 ### How to reproduce / inspect in Lean
 
-A few helpful commands while browsing the files:
+A few helpful commands while browsing:
 
 ```lean
--- In Kernel/Examples/Blelloch.lean
-#check WG.IR.wgScanStmt
-#check WG.wgScanGrade
-#check WG.IR.hasGrade_forThreads_wgScanStmt
-#check wgScanStmt_upToNorm
-#check hasGrade_forThreads_wgScanStmt_upToNorm
+-- IR-level certificate (used internally by the WGSL theorem):
+#check Kernel.Examples.WG.IR.hasGrade_forThreads_wgScanStmt_upToNorm
 
--- Inspect normalization lemmas for single stages:
-#check WG.IR.gradeUpsweepIR_normalizes
-#check WG.IR.gradeDownsweepIR_normalizes
-
--- Inspect safety facts:
-#check WG.IR.wgScanGradeIR_safe
-#check Kernel.PhasesSafe.barrier
-#check Kernel.Lemmas.upsweep_index_distinct
-
--- WGSL backend and certificate (WGSL/Codegen.lean)
-#check WGSL.buildModule
-#check WGSL.PP.emit
+-- End-to-end WGSL certificate:
 #check WGSL.CertifiedEmit_wgScan
-#eval WGSL.PP.emit (WGSL.buildModule default (Kernel.Examples.WG.IR.wgScanStmt [1,2,4,8]))
+#check WGSL.emit_grade_eq_IR
+#eval WGSL.PP.emit (WGSL.buildModule WGSL.emitEnv (Kernel.Examples.WG.IR.wgScanStmt [1,2,4,8]))
 ```
 
 To build everything:
