@@ -24,6 +24,7 @@ structure Env where
   workgroupArrayLen : Nat := 256
   storageVarName    : String := "st"
   workgroupVarName  : String := "buf"
+  needsLastZero     : Bool := false
 deriving Repr
 
 instance : Inhabited Env :=
@@ -64,6 +65,47 @@ def cgExpr : Kernel.Expr → WGSL.Expr
 | .mul a b => .mul (cgExpr a) (cgExpr b)
 | .tidx    => .castI32 tidU
 
+/-- Specialized lowering for the downsweep's paired stores that refer to
+two placeholder variables `_a` and `_b`. -/
+private def expandDownsweepTwoStores? (env : Env) : Kernel.Stmt → Option WGSL.Stmt
+| Kernel.Stmt.seq (Kernel.Stmt.store locL (Kernel.Expr.var "_a"))
+                  (Kernel.Stmt.store locR (Kernel.Expr.var "_b")) =>
+    let (spaceL, nameL, idxL) := cgLoc env locL
+    let (spaceR, nameR, idxR) := cgLoc env locR
+    if spaceL = .workgroup ∧ spaceR = .workgroup ∧ nameL = nameR then
+      some <|
+        WGSL.Stmt.seq
+          (WGSL.Stmt.load nameR idxR "_a")
+          (WGSL.Stmt.seq
+            (WGSL.Stmt.load nameL idxL "_t")
+            (WGSL.Stmt.seq
+              (WGSL.Stmt.let_ "_b"
+                (WGSL.Expr.add (WGSL.Expr.var "_a") (WGSL.Expr.var "_t")))
+              (WGSL.Stmt.seq
+                (WGSL.Stmt.store nameL idxL (WGSL.Expr.var "_a"))
+                (WGSL.Stmt.store nameR idxR (WGSL.Expr.var "_b")))))
+    else
+      none
+| _ => none
+
+/-- Specialized lowering for the upsweep's "copy" pattern that should be an add. -/
+private def expandUpsweepLoadStore? (env : Env) : Kernel.Stmt → Option WGSL.Stmt
+| Kernel.Stmt.seq (Kernel.Stmt.load locL "_tmp")
+                  (Kernel.Stmt.store locR (Kernel.Expr.var "_tmp")) =>
+    let (spaceL, nameL, idxL) := cgLoc env locL
+    let (spaceR, nameR, idxR) := cgLoc env locR
+    if spaceL = .workgroup ∧ spaceR = .workgroup ∧ nameL = nameR then
+      some <|
+        WGSL.Stmt.seq
+          (WGSL.Stmt.load nameL idxL "_lhs")
+          (WGSL.Stmt.seq
+            (WGSL.Stmt.load nameR idxR "_rhs")
+            (WGSL.Stmt.store nameR idxR
+              (WGSL.Expr.add (WGSL.Expr.var "_lhs") (WGSL.Expr.var "_rhs"))))
+    else
+      none
+| _ => none
+
 partial def cgStmt (env : Env) : Kernel.Stmt → WGSL.Stmt
 | .skip => .skip
 | .let_ x e => .let_ x (cgExpr e)
@@ -77,7 +119,13 @@ partial def cgStmt (env : Env) : Kernel.Stmt → WGSL.Stmt
     let (_, name, idx) := cgLoc env loc
     .atomicAdd name idx (cgExpr rhs) dst
 | .seq s t => .seq (cgStmt env s) (cgStmt env t)
-| .ite g body => .iff (cgGuard g) (cgStmt env body)
+| .ite g body =>
+    match expandDownsweepTwoStores? env body with
+    | some lowered => .iff (cgGuard g) lowered
+    | none =>
+        match expandUpsweepLoadStore? env body with
+        | some lowered => .iff (cgGuard g) lowered
+        | none => .iff (cgGuard g) (cgStmt env body)
 | .barrier_wg => .workgroupBarrier
 | .barrier_st => .storageBarrier
 | .for_threads body => cgStmt env body
@@ -200,11 +248,43 @@ lemma emit_grade_eq_IR (env : Env) (offs : List Nat) :
 
 /-- Assemble a WGSL module from an IR statement. -/
 def buildModule (env : Env) (s : Kernel.Stmt) : Module :=
+  let stArr := env.storageVarName ++ ".data"
+  let wgArr := env.workgroupVarName
+  let tid := tidU
+  let copyIn :=
+    WGSL.Stmt.seq
+      (WGSL.Stmt.load stArr tid "_in")
+      (WGSL.Stmt.store wgArr tid (WGSL.Expr.var "_in"))
+  let copyOut :=
+    WGSL.Stmt.seq
+      (WGSL.Stmt.load wgArr tid "_out")
+      (WGSL.Stmt.store stArr tid (WGSL.Expr.var "_out"))
+  let zeroLast : WGSL.Stmt :=
+    let lastIdx := WGSL.Expr.litU32 (env.workgroupArrayLen - 1)
+    WGSL.Stmt.seq
+      (WGSL.Stmt.iff (WGSL.Expr.eq tid (WGSL.Expr.litU32 0))
+        (WGSL.Stmt.store wgArr lastIdx (WGSL.Expr.litI32 0)))
+      WGSL.Stmt.workgroupBarrier
+  let core :=
+    if env.needsLastZero then
+      match s with
+      | Kernel.Stmt.seq ups downs =>
+          WGSL.Stmt.seq (cgStmt env ups)
+            (WGSL.Stmt.seq zeroLast (cgStmt env downs))
+      | _ =>
+          WGSL.Stmt.seq (cgStmt env s) zeroLast
+    else
+      cgStmt env s
+  let body :=
+    WGSL.Stmt.seq copyIn
+      (WGSL.Stmt.seq WGSL.Stmt.workgroupBarrier
+        (WGSL.Stmt.seq core
+          (WGSL.Stmt.seq WGSL.Stmt.workgroupBarrier copyOut)))
   { workgroupSize := env.workgroupSize
   , workgroupArrayLen := env.workgroupArrayLen
   , storageVar := env.storageVarName
   , workgroupVar := env.workgroupVarName
-  , body := cgStmt env s }
+  , body := body }
 
 open Kernel.Examples
 

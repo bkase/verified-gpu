@@ -26,6 +26,7 @@ def emitEnv : Env :=
   , workgroupArrayLen := wgSize
   , storageVarName := "st"
   , workgroupVarName := "buf"
+  , needsLastZero := true
   }
 
 def wgScanStmt : Kernel.Stmt :=
@@ -42,64 +43,17 @@ def scanCertification :
 def wgslModule : Module :=
   WGSL.buildModule emitEnv wgScanStmt
 
-def asUint (n : Nat) : String :=
-  toString n ++ "u"
-
 def certifiedText : String :=
   let _ := scanCertification
   WGSL.PP.emit wgslModule
 
-def runtimeWgsl : String :=
-  let sizeStr := asUint wgSize
-  let lastIdx := asUint (wgSize - 1)
-  let halfStr := asUint (wgSize / 2)
-  "struct Buf { data: array<i32>, };\n"
-  ++ "@group(0) @binding(0) var<storage, read_write> st: Buf;\n"
-  ++ "var<workgroup> buf: array<i32, " ++ sizeStr ++ ">;\n\n"
-  ++ "@compute @workgroup_size(" ++ toString wgSize ++ ")\n"
-  ++ "fn main(@builtin(local_invocation_id) lid: vec3<u32>) {\n"
-  ++ "  let tid = lid.x;\n"
-  ++ "  if (tid >= " ++ sizeStr ++ ") {\n"
-  ++ "    return;\n"
-  ++ "  }\n\n"
-  ++ "  buf[tid] = st.data[tid];\n"
-  ++ "  workgroupBarrier();\n\n"
-  ++ "  var offset = 1u;\n"
-  ++ "  loop {\n"
-  ++ "    if (offset >= " ++ sizeStr ++ ") { break; }\n"
-  ++ "    let idx = ((tid + 1u) * offset * 2u) - 1u;\n"
-  ++ "    if (idx < " ++ sizeStr ++ ") {\n"
-  ++ "      buf[idx] = buf[idx] + buf[idx - offset];\n"
-  ++ "    }\n"
-  ++ "    workgroupBarrier();\n"
- ++ "    offset *= 2u;\n"
-  ++ "  }\n\n"
-  ++ "  if (tid == 0u) {\n"
-  ++ "    buf[" ++ lastIdx ++ "] = 0;\n"
-  ++ "  }\n"
-  ++ "  workgroupBarrier();\n\n"
-  ++ "  var downOffset = " ++ halfStr ++ ";\n"
-  ++ "  loop {\n"
-  ++ "    if (downOffset == 0u) { break; }\n"
-  ++ "    let idx = ((tid + 1u) * downOffset * 2u) - 1u;\n"
-  ++ "    if (idx < " ++ sizeStr ++ ") {\n"
-  ++ "      let t = buf[idx - downOffset];\n"
-  ++ "      buf[idx - downOffset] = buf[idx];\n"
-  ++ "      buf[idx] = buf[idx] + t;\n"
-  ++ "    }\n"
-  ++ "    workgroupBarrier();\n"
-  ++ "    downOffset /= 2u;\n"
-  ++ "  }\n\n"
-  ++ "  st.data[tid] = buf[tid];\n"
-  ++ "}\n"
-
 def wgslSource : String :=
   "/* Certified WGSL (auto-generated):\n"
   ++ certifiedText ++ "\n*/\n\n"
-  ++ runtimeWgsl
+  ++ certifiedText
 
 def defaultOutputPath : System.FilePath :=
-  "wgsl-harness" / "kernel.wgsl"
+  "wgsl-harness" / ".generated" / "kernel.wgsl"
 
 def emitWGSLTo (path : System.FilePath) : IO Unit := do
   match path.parent with

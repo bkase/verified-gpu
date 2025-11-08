@@ -61,7 +61,29 @@ lake build Effects   # phase alphabet + grades + normalization
 lake build Kernel    # Syntax, Typing, Lemmas (e.g., affine facts)
 lake build Tests     # sample programs / grade synthesis smoke tests
 lake build WGSL      # WGSL AST + footprint + certified emitter
+
+# run the executable kernel harness once proofs/build succeed
+cargo test -p wgsl-harness --manifest-path wgsl-harness/Cargo.toml
 ```
+
+### Running the WGSL harness
+
+The Rust harness in `wgsl-harness/` uses `build.rs` to call `lake exe emitWGSL`
+and drops the certified kernel at `wgsl-harness/.generated/kernel.wgsl`. Every
+`cargo build`/`cargo test` automatically refreshes this artifact and exports the
+absolute path via `WGSL_KERNEL_PATH`, so you do **not** need to run the Lean
+emitter manually.
+
+To execute the end-to-end GPU test (which uploads a 256-element array, runs the
+certified scan, and checks the exclusive prefix sums), simply run:
+
+```bash
+cargo test --manifest-path wgsl-harness/Cargo.toml
+```
+
+Ensure you have a WebGPU-capable runtime (wgpu will fall back to software if
+needed). The test named `computes_exclusive_scan` should pass and mirrors the
+WGSL produced by the proofs.
 
 Repository layout (high‑level):
 
