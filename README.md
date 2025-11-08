@@ -121,7 +121,7 @@ Typing is not just bookkeeping — it enforces absence of data races:
 
 ---
 
-## Theorem spotlight: end‑to‑end data‑race freedom for the concrete Blelloch scan
+## Theorem spotlight: end-to-end data-race freedom for the concrete Blelloch scan
 
 ### What the theorem says
 
