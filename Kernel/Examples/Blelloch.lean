@@ -1490,7 +1490,6 @@ lemma ThreadsFree_wgScanStmt (offs : List Nat) :
   ThreadsFree (wgScanStmt offs) := by
   simp [wgScanStmt, ThreadsFree_wgUpsweepStmt, ThreadsFree_wgDownsweepStmt]
 
-/-- Final wrapper: synthesize `for_threads` over the concrete scan body. -/
 lemma hasGrade_forThreads_wgScanStmt {Γ : Ctx} {offs : List Nat} :
   HasGrade Γ (.for_threads (wgScanStmt offs)) (gradeOf (wgScanStmt offs)) := by
   have hb : HasGrade Γ (wgScanStmt offs) (gradeOf (wgScanStmt offs)) :=
@@ -1506,22 +1505,21 @@ notation:50 g " ≈ " h => Effects.Grade.denote g = Effects.Grade.denote h
 @[simp] lemma gradeOf_wgScanStmt_normalizes (offs : List Nat) :
   Effects.Grade.normalize (Kernel.gradeOf (WG.IR.wgScanStmt offs))
     = WG.wgScanGrade offs := by
-  -- you already proved `gradeOf_wgScanStmt`
-  simpa [WG.IR.gradeOf_wgScanStmt] using
-    WG.IR.wgScanGradeIR_normalizes offs
+  simpa [gradeOf_wgScanStmt] using
+    wgScanGradeIR_normalizes offs
 
 lemma wgScanStmt_upToNorm (offs) :
-  Kernel.gradeOf (WG.IR.wgScanStmt offs) ≈ WG.wgScanGrade offs := by
+  Kernel.gradeOf (wgScanStmt offs) ≈ wgScanGrade offs := by
   simp [Effects.Grade.denote,
-    WG.IR.gradeOf_wgScanStmt,
-    WG.IR.wgScanGradeIR_normalizes,
-    WG.wgScanGrade_normal]
+    gradeOf_wgScanStmt,
+    wgScanGradeIR_normalizes,
+    wgScanGrade_normal]
 
 lemma hasGrade_forThreads_wgScanStmt_upToNorm {Γ} (offs) :
-  HasGrade Γ (.for_threads (WG.IR.wgScanStmt offs))
-           (Kernel.gradeOf (WG.IR.wgScanStmt offs))
-  ∧ Kernel.gradeOf (WG.IR.wgScanStmt offs) ≈ WG.wgScanGrade offs :=
-⟨ WG.IR.hasGrade_forThreads_wgScanStmt (Γ := Γ) (offs := offs)
+  HasGrade Γ (.for_threads (wgScanStmt offs))
+           (gradeOf (wgScanStmt offs))
+  ∧ gradeOf (wgScanStmt offs) ≈ wgScanGrade offs :=
+⟨ hasGrade_forThreads_wgScanStmt (Γ := Γ) (offs := offs)
  , wgScanStmt_upToNorm offs ⟩
 
 end WG.IR
