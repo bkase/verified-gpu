@@ -449,6 +449,32 @@ lemma normalizeList_barrier_middle_append (xs ys : List Phase) :
             ++ normalizeList.loop none ys [] := by
           simp [hprefix', List.append_assoc]
 
+/-- A single non-empty phase is a fixed point of `normalizeList`. -/
+@[simp] lemma normalizeList_single_nonempty
+  (r : Phase) (hr : r.empty = false) :
+  normalizeList [r] = [r] := by
+  -- unfold to the loop and take 1 non-empty step, then flush the pending
+  unfold normalizeList
+  have hstep :
+      normalizeList.loop none (r :: []) []
+        = normalizeList.loop (some r) [] [] := by
+    -- none + non-empty head → some r
+    simp [normalizeList.loop, hr]
+  calc
+    normalizeList.loop none (r :: []) []
+        = normalizeList.loop (some r) [] [] := hstep
+    _ = [] ++ [r] := by simp      -- flush pending r
+    _ = [r] := by simp
+
+/-- A single non-empty phase followed by the explicit barrier pair is a fixed point. -/
+lemma normalizeList_single_nonempty_barrier
+  (r : Phase) (hr : r.empty = false) :
+  normalizeList ([r] ++ [⟨[], []⟩, ⟨[], []⟩])
+    = [r] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+  -- cut at the right barrier, then use the single-nonempty lemma
+  simpa [normalizeList_single_nonempty r hr]
+    using normalizeList_append_barrier_right (xs := [r])
+
 /-- Normalize a grade: fuse adjacent non-empty phases, never across empties. -/
 def normalize (g : Grade) : Grade :=
   match g with

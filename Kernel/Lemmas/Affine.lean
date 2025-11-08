@@ -8,9 +8,6 @@ import Mathlib.Data.Int.Basic
 import Mathlib.Tactic.Linarith
 import Effects
 
--- Can't figure out how to get some of these simpa's to go away
-set_option linter.unnecessarySimpa false
-
 namespace Kernel
 namespace Lemmas
 open Effects
@@ -107,14 +104,12 @@ lemma upsweep_guard_mixed_targets_ne
   have hleft :
       (i + off) % (2 * off) = off := by
     have hoff_mod : off % (2 * off) = off := Nat.mod_eq_of_lt hoff_lt
-    simpa [Nat.add_mod, hi, hoff_mod, Nat.zero_mod] using
-      (Nat.add_mod i off (2 * off))
+    simp [Nat.add_mod, hi, hoff_mod]
   have hright :
       (j + 2 * off) % (2 * off) = 0 := by
     have htwo_mod : (2 * off) % (2 * off) = 0 := by
       simp [Nat.mul_comm]
-    simpa [Nat.add_mod, hj, htwo_mod, Nat.zero_mod] using
-      (Nat.add_mod j (2 * off) (2 * off))
+    simp [hj]
   -- Take both sides of `hNat` modulo `2*off` to reach a contradiction.
   have := congrArg (fun n => n % (2 * off)) hNat
   simp [hleft, hright] at this
@@ -148,7 +143,7 @@ lemma mod_after_shift_is_off {i off : Nat} (hoff : 0 < off)
     have : 1 < 2 := by decide
     simpa [one_mul] using Nat.mul_lt_mul_of_pos_right this hoff
   have h1 : off % (2 * off) = off := Nat.mod_eq_of_lt lt
-  simpa [Nat.add_mod, hi, h1, Nat.zero_mod] using (Nat.add_mod i off (2 * off))
+  simp [Nat.add_mod, hi, h1]
 
 /-- A bookkeeping lemma: if `off>0` and `j = i + 2*off - 1`, then `j+1 = i + 2*off`. -/
 lemma succ_of_right_target {i j off : Nat} (hoff : 0 < off) :

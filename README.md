@@ -39,6 +39,8 @@ GPU kernels are easy to get subtly wrong (missing barriers, aliasing writes, RAW
 
 ## Getting started
 
+Toolchain is pinned in `lean-toolchain` (currently Lean 4.25 RC). Build and run everything via `lake` (mathlib required).
+
 ```bash
 # optional: reproducible shell
 direnv allow     # or: nix develop  /  devenv shell
@@ -46,8 +48,9 @@ direnv allow     # or: nix develop  /  devenv shell
 # ensure toolchain
 elan toolchain install $(cat lean-toolchain)
 lake build
-# default target only checks `LanguageQuantale`; build everything you care about explicitly
-lake build Kernel    # includes Kernel/Syntax, Typing, Lemmas (e.g. affine facts)
+# default target only checks `LanguageQuantale`; build other libraries explicitly
+lake build Effects   # phase alphabet + grades + normalization
+lake build Kernel    # Syntax, Typing, Lemmas (e.g., affine facts)
 lake build Tests     # sample programs / grade synthesis smoke tests
 ```
 
@@ -55,20 +58,28 @@ Repo layout:
 
 ```
 LanguageQuantale.lean   -- Words & languages; quantale instances
-Effects.lean            -- GPU phase alphabet, Grade ops, denotation & safety preds
+Effects.lean            -- GPU phase alphabet; Grade ops, normalization, denotation; safety preds
 Kernel/                 -- Core WGSL-like IR & typing judgment
   Syntax.lean           -- Expressions, locations, statements
   Typing.lean           -- Graded typing rules + synthesizer (`gradeOf`)
   Lemmas/               -- Reusable arithmetic and guard reasoning facts
     Affine.lean         -- Affine index lemmas for Blelloch-style scans
   Examples/             -- Drop-in proof patterns for specific kernels
-    Blelloch.lean       -- Upsweep/downsweep phases + HasGrade helpers
+    Blelloch.lean       -- Upsweep/downsweep + end-to-end scan grade proofs
 Tests/                  -- Quick grade synthesis checks
   GradeEval.lean        -- End-to-end sample touching every statement form
 lakefile.lean           -- Lake config (packages & targets)
 lean-toolchain          -- Lean toolchain pin
 devenv.nix              -- Nix dev shell (elan, git, node)
 ```
+
+---
+
+## Current status
+
+- Effects and grades now include a list-level normalizer that fuses adjacent non-empty phases while preserving explicit barrier cuts. See `Effects.Grade.normalize` and lemmas such as `normalizeList_barrier_*` and `normalizeList_single_nonempty*`.
+- The Blelloch scan example contains proofs that both upsweeps and downsweeps end with the explicit barrier and that the whole spec grade is a fixed point of normalization: `wgScanGrade_normal` in `Kernel/Examples/Blelloch.lean`.
+- DRF side-conditions are exposed as `WritesDisjointPhase` and `NoRAWIntraPhase`, checked per phase by `Kernel.HasGrade.g_for_threads` via `Kernel.PhasesSafe`.
 
 ---
 
@@ -172,6 +183,14 @@ $$
 
 - `phases(g)` is `Grade.phases g` (exposed in Lean for the side-condition)
 - `WritesDisjointPhase` / `NoRAWIntraPhase` come from `Effects.lean`
+
+---
+
+## Contributing
+
+- Build and test with `lake` (mathlib is fetched automatically). If you need to run `lean` directly, prefix with `lake env`.
+- When adding imports in new files, use `.` separators (e.g., `import Kernel.Typing`).
+- House style note: prefer `simp` (or `simp [facts]`) to close goals rather than `simpa using …` where possible.
 
 ### Explanations & side-conditions
 
