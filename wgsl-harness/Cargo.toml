@@ -1,0 +1,11 @@
+[package]
+name = "wgsl-harness"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+wgpu = "27"
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+anyhow = "1.0"

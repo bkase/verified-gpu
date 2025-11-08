@@ -2,3 +2,5 @@
 .devenv/
 .direnv/
 .devenv.flake.nix
+wgsl-harness/.generated/
+wgsl-harness/target/

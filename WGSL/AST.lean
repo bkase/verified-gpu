@@ -73,7 +73,7 @@ partial def ppS : Stmt → List String
 
 def emit (m : Module) : String :=
   let hdr :=
-    "struct Buf { data: array<i32>; };\n" ++
+    "struct Buf { data: array<i32>, };\n" ++
     s!"@group(0) @binding(0) var<storage, read_write> {m.storageVar}: Buf;\n" ++
     s!"var<workgroup> {m.workgroupVar}: array<i32, {m.workgroupArrayLen}u>;\n"
   let entry :=

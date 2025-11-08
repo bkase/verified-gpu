@@ -17,6 +17,9 @@
     LEAN_SRC_PATH = ".";
   };
 
+  # https://devenv.sh/supported-languages/rust/
+  languages.rust.enable = true;
+
   # https://devenv.sh/scripts/
   scripts.build.exec = "lake build";
   scripts.check.exec = "lean HelloWorld.lean";
