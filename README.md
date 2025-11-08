@@ -91,6 +91,23 @@ Chrome/Edge/Safari build with WebGPU enabled. The page fetches the certified
 `./.generated/kernel.wgsl`, dispatches it via the WebGPU API, and prints the GPU
 exclusive-scan output alongside a CPU baseline.
 
+### GitHub Pages demo
+
+The repository also contains a pre-packaged copy of the harness under `docs/`
+so GitHub Pages can host it directly:
+
+```bash
+# Regenerate the certified WGSL artifact before pushing:
+lake exe emitWGSL docs/kernel.wgsl
+
+# (optional) preview locally
+uv run python -m http.server --directory docs 9000
+```
+
+Push to `main` (with Pages configured to serve from `/docs`). Visit
+`https://<user>.github.io/verified-gpu/` to exercise the same WebGPU scan in the
+browser—no extra backend needed.
+
 Repository layout (high‑level):
 
 ```
