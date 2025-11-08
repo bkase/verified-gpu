@@ -16,7 +16,7 @@
 2. [Getting started](#getting-started)
 3. [Design in 90 seconds](#design-in-90-seconds)
 4. [Typing rules](#typing-rules)
-5. [Theorem spotlight: end‑to‑end data‑race freedom for the concrete Blelloch scan](#theorem-spotlight-end-to-end-data-race-freedom-for-the-concrete-blelloch-scan)
+5. [Theorem spotlight: end-to-end data-race freedom for the concrete Blelloch scan](#theorem-spotlight-end-to-end-data-race-freedom-for-the-concrete-blelloch-scan)
    - [What the theorem says](#what-the-theorem-says)
    - [Why “up to normalization”?](#why-up-to-normalization)
    - [Where the pieces live (code map)](#where-the-pieces-live-code-map)
