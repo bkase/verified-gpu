@@ -69,8 +69,7 @@
         crypto.getRandomValues(raw);
         const data = new Int32Array(laneCount);
         for (let i = 0; i < laneCount; ++i) {
-          // Small range keeps sums readable and avoids overflow.
-          data[i] = (raw[i] % 21) - 10;
+          data[i] = (raw[i] % 2001) - 1000; // range [-1000, 1000]
         }
 
         // Storage buffer used by the certified kernel.
