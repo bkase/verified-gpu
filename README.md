@@ -85,6 +85,12 @@ Ensure you have a WebGPU-capable runtime (wgpu will fall back to software if
 needed). The test named `computes_exclusive_scan` should pass and mirrors the
 WGSL produced by the proofs.
 
+Prefer a browser demo? Serve `wgsl-harness/index.html` (for example,
+`python -m http.server --directory wgsl-harness`) and open it in a recent
+Chrome/Edge/Safari build with WebGPU enabled. The page fetches the certified
+`./.generated/kernel.wgsl`, dispatches it via the WebGPU API, and prints the GPU
+exclusive-scan output alongside a CPU baseline.
+
 Repository layout (high‑level):
 
 ```
