@@ -1,6 +1,6 @@
 # VerifiedGPU: Graded-Effect Semantics for Race‑Free WebGPU Kernels (Lean 4)
 
-**VerifiedGPU** is a Lean 4 project that formalizes a lightweight kernel model close to the WebGPU Shading Language (WGSL), and uses a **language quantale** to reason compositionally about absence of data races and about barrier placement. WGSL is the shading language for the modern web graphics standard called [WebGPU](https://en.wikipedia.org/wiki/WebGPU). The first target demonstration is a verified **Blelloch‑style scan** ([exclusive prefix sum](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)) with workgroup barriers that are intended to be optimal, plus a path to certified WGSL emission. You can run the certified WGSL in the browser via the WebGPU harness at [bkase.github.io/verified-gpu](https://bkase.github.io/verified-gpu).
+**VerifiedGPU** is a proof-of-concept Lean 4 project that formalizes a lightweight kernel model close to the WebGPU Shading Language (WGSL), and uses a **language quantale** to reason compositionally about absence of data races and about barrier placement. WGSL is the shading language for the modern web graphics standard called [WebGPU](https://en.wikipedia.org/wiki/WebGPU). This proof of concept demonstrates the approach with a verified **Blelloch‑style scan** ([exclusive prefix sum](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda)) featuring workgroup barriers that are intended to be optimal, along with certified WGSL code emission. You can run the certified WGSL in the browser via the WebGPU harness at [bkase.github.io/verified-gpu](https://bkase.github.io/verified-gpu).
 
 - Quantale of languages: `Lang α := Set (Word α)` with concatenation and arbitrary joins
 - GPU “phase alphabet”: `Phase` (reads/writes/guards/space)
@@ -39,7 +39,7 @@ Kernels for graphics processing units are easy to get subtly wrong (missing barr
 - **split phases** at barriers,
 - prove **pairwise disjointness** and **intra‑phase read‑after‑write safety**,
 - lift into a **quantale** of phase traces for compositional laws,
-- (soon) emit WGSL code matching the proven barrier structure.
+- emit WGSL code matching the proven barrier structure.
 
 What is the Blelloch scan? It is the classic work‑efficient parallel exclusive prefix‑sum that proceeds in two tree‑shaped passes over an array: an “upsweep” reduction to build partial sums, followed by a “downsweep” to produce exclusive prefixes; each level uses synchronization. It performs a total amount of work that scales linearly with the input size and has span that grows logarithmically with the input size. It is a standard primitive for graphics processing units. See the overview in GPU Gems 3, Chapter 39: [Parallel Prefix Sum (Scan) with CUDA](https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda).
 
