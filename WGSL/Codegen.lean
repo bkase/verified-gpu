@@ -251,7 +251,6 @@ theorem CertifiedEmit_wgScan {Γ} (env : Env) (offs : List Nat) :
     let s := WG.IR.wgScanStmt offs;
     HasGrade Γ (.for_threads s) (eraseGrade (gradeOfGen env s)) ∧
     eraseGrade (gradeOfGen env s) ≈ WG.wgScanGrade offs := by
-  classical
   intro s
   have ⟨hHas, hUpTo⟩ := WG.IR.hasGrade_forThreads_wgScanStmt_upToNorm (Γ := Γ) offs
   have hPres := emit_grade_eq_IR env offs

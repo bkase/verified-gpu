@@ -1381,7 +1381,6 @@ lemma wgScanGradeIR_safe {offs : List Nat} :
     to the abstract scan grade. -/
 lemma wgScanGradeIR_normalizes (offs : List Nat) :
   Grade.normalize (wgScanGradeIR offs) = WG.wgScanGrade offs := by
-  classical
   cases offs with
   | nil =>
       -- Prove equality of lists and fold back via Word.ext
