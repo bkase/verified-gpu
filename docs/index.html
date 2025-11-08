@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <title>VerifiedGPU Blelloch Scan (WebGPU Harness)</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script src="https://cdn.tailwindcss.com"></script>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-light.min.css"
@@ -31,23 +32,97 @@
       src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
     ></script>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 0; background: #fff; }
-      main { padding: 2rem; }
-      pre { background: #111; color: #0f0; padding: 1rem; overflow: auto; }
-      button { padding: 0.5rem 1rem; font-size: 1rem; }
-      #status { margin-top: 1rem; font-weight: 600; }
-      .markdown-body { margin: 0; padding: 0; }
-      #project-docs { margin-top: 3rem; }
+      html { scroll-behavior: smooth; }
+      .markdown-body {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      /* Ensure heading anchors have proper spacing for scroll targets */
+      .markdown-body h1, .markdown-body h2, .markdown-body h3,
+      .markdown-body h4, .markdown-body h5, .markdown-body h6 {
+        scroll-margin-top: 1rem;
+      }
+      /* Fix bullet point rendering */
+      .markdown-body ul, .markdown-body ol {
+        display: block;
+        list-style: revert;
+        margin: 1em 0;
+        padding-left: 2em;
+      }
+      .markdown-body ul {
+        list-style-type: disc;
+      }
+      .markdown-body ol {
+        list-style-type: decimal;
+      }
+      .markdown-body li {
+        display: list-item;
+        margin: 0.5em 0;
+      }
+      .markdown-body ul ul {
+        list-style-type: circle;
+        margin: 0.5em 0;
+      }
+      .markdown-body ul ul ul {
+        list-style-type: square;
+      }
     </style>
   </head>
-  <body>
-    <main>
-      <button id="run">Run Blelloch Scan</button>
-      <div id="status">Idle.</div>
-      <h2>Results</h2>
-      <pre id="output">(awaiting run)</pre>
+  <body class="bg-gradient-to-br from-stone-50 via-amber-50 to-red-50 min-h-screen font-serif">
+    <main class="max-w-6xl mx-auto px-3 py-4 sm:px-6 sm:py-8 lg:px-8">
+      <!-- Hero Section -->
+      <div class="mb-4 sm:mb-8">
+        <div class="text-center mb-4 sm:mb-6">
+          <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-red-700 via-red-600 to-red-800 bg-clip-text text-transparent mb-2 sm:mb-3">
+            VerifiedGPU
+          </h1>
+          <p class="text-lg sm:text-xl text-stone-700 font-medium italic">Formally Verified WebGPU Compute Kernels</p>
+        </div>
+      </div>
 
-      <section id="project-docs">
+      <!-- Interactive Demo Card -->
+      <div class="bg-white rounded-lg shadow-2xl border border-stone-300 overflow-hidden mb-6 sm:mb-12 transition-all duration-300 hover:shadow-3xl">
+        <div class="bg-gradient-to-r from-red-600 via-red-700 to-red-800 p-4 sm:p-6 border-b-4 border-red-900">
+          <h2 class="text-xl sm:text-2xl font-bold text-white flex items-center gap-2 sm:gap-3">
+            <svg class="w-6 h-6 sm:w-8 sm:h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+            Blelloch Scan Demo
+          </h2>
+          <p class="text-red-100 mt-1 sm:mt-2 italic text-sm sm:text-base">Run the certified parallel prefix scan on your GPU</p>
+        </div>
+
+        <div class="p-4 sm:p-8 bg-stone-50">
+          <div class="flex flex-col sm:flex-row items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+            <button id="run" class="w-full sm:w-auto group relative px-6 py-3 sm:px-8 sm:py-4 bg-gradient-to-r from-red-600 to-red-800 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center justify-center gap-2 sm:gap-3">
+              <svg class="w-5 h-5 sm:w-6 sm:h-6 group-hover:rotate-12 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              Run Blelloch Scan
+            </button>
+
+            <div id="status" class="w-full sm:w-auto px-4 py-2 sm:px-6 sm:py-3 rounded-lg bg-stone-100 border-2 border-stone-400 font-semibold text-stone-700 flex items-center justify-center sm:justify-start gap-2 text-sm sm:text-base">
+              <span class="w-3 h-3 rounded-full bg-stone-500 animate-pulse"></span>
+              Idle.
+            </div>
+          </div>
+
+          <div class="bg-white rounded-lg p-3 sm:p-6 border-2 border-stone-300 shadow-inner">
+            <h3 class="text-base sm:text-lg font-bold text-stone-900 mb-3 sm:mb-4 flex items-center gap-2 border-b border-stone-300 pb-2">
+              <svg class="w-4 h-4 sm:w-5 sm:h-5 text-red-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+              </svg>
+              Results
+            </h3>
+            <pre id="output" class="bg-black text-green-400 p-3 sm:p-4 rounded overflow-auto text-xs sm:text-sm font-mono shadow-inner border-2 border-stone-800">(awaiting run)</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- README Section -->
+      <section id="project-docs" class="bg-white rounded-lg shadow-xl border-2 border-stone-300 p-4 sm:p-8">
         <article id="readme-content" class="markdown-body">Loading README…</article>
       </section>
     </main>
@@ -58,9 +133,27 @@
 
       const statusEl = document.getElementById("status");
       const outputEl = document.getElementById("output");
+
+      function setStatus(text, type = "idle") {
+        const colors = {
+          idle: "bg-stone-100 border-stone-400 text-stone-700",
+          running: "bg-red-100 border-red-400 text-red-900",
+          success: "bg-green-100 border-green-400 text-green-800",
+          error: "bg-red-100 border-red-500 text-red-900"
+        };
+        const dots = {
+          idle: "bg-stone-500",
+          running: "bg-red-600",
+          success: "bg-green-600",
+          error: "bg-red-700"
+        };
+        statusEl.className = `px-6 py-3 rounded-lg border-2 font-semibold flex items-center gap-2 transition-all duration-300 ${colors[type]}`;
+        statusEl.innerHTML = `<span class="w-3 h-3 rounded-full ${dots[type]} ${type === "running" ? "animate-pulse" : ""}"></span>${text}`;
+      }
+
       document.getElementById("run").addEventListener("click", () => run().catch(err => {
         console.error(err);
-        statusEl.textContent = `Error: ${err.message ?? err}`;
+        setStatus(`Error: ${err.message ?? err}`, "error");
       }));
 
       async function run() {
@@ -68,14 +161,14 @@
           throw new Error("WebGPU is not available in this browser.");
         }
 
-        statusEl.textContent = "Requesting adapter/device…";
+        setStatus("Requesting adapter/device…", "running");
         const adapter = await navigator.gpu.requestAdapter();
         if (!adapter) {
           throw new Error("Failed to acquire GPU adapter.");
         }
         const device = await adapter.requestDevice();
 
-        statusEl.textContent = "Fetching certified WGSL…";
+        setStatus("Fetching certified WGSL…", "running");
         const response = await fetch("./kernel.wgsl");
         if (!response.ok) {
           throw new Error(`Unable to fetch kernel.wgsl: ${response.status}`);
@@ -115,7 +208,7 @@
           entries: [{ binding: 0, resource: { buffer: storageBuffer } }],
         });
 
-        statusEl.textContent = "Dispatching compute work…";
+        setStatus("Dispatching compute work…", "running");
         const encoder = device.createCommandEncoder();
         const pass = encoder.beginComputePass();
         pass.setPipeline(pipeline);
@@ -132,7 +225,7 @@
         const expected = cpuExclusiveScan(data);
         const ok = arraysEqual(mapped, expected);
 
-        statusEl.textContent = ok ? "Success: GPU output matches CPU baseline." : "Mismatch detected!";
+        setStatus(ok ? "Success: GPU output matches CPU baseline." : "Mismatch detected!", ok ? "success" : "error");
         outputEl.textContent = `Input  : ${formatArray(data)}\nExpected: ${formatArray(expected)}\nGPU     : ${formatArray(mapped)}`;
       }
 
@@ -177,9 +270,30 @@
             throw new Error(`HTTP ${response.status}`);
           }
           const markdown = await response.text();
-          marked.setOptions({ gfm: true, breaks: false, headerIds: true, mangle: false });
+
+          // Configure marked with GitHub-style heading IDs
+          marked.use({
+            gfm: true,
+            breaks: false,
+            headerIds: true,
+            mangle: false,
+            renderer: {
+              heading(text, level, raw) {
+                // Generate GitHub-style IDs: lowercase, spaces to hyphens, remove special chars
+                const id = raw
+                  .toLowerCase()
+                  .trim()
+                  .replace(/[^\w\s-]/g, '')
+                  .replace(/\s+/g, '-')
+                  .replace(/-+/g, '-');
+                return `<h${level} id="${id}">${text}</h${level}>`;
+              }
+            }
+          });
+
           const html = marked.parse(markdown);
-          readmeContainer.innerHTML = DOMPurify.sanitize(html);
+          readmeContainer.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ['id'] });
+
           await waitForHighlightLang("lean");
           if (window.hljs?.highlightAll) {
             window.hljs.highlightAll();

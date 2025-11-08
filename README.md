@@ -17,15 +17,15 @@
 2. [Getting started](#getting-started)
 3. [Design in 90 seconds](#design-in-90-seconds)
 4. [Typing rules](#typing-rules)
-5. [Theorem spotlight: end-to-end data-race freedom for the concrete Blelloch scan](#theorem-spotlight-end-to-end-data-race-freedom-for-the-concrete-blelloch-scan)
-   - [What the theorem says](#what-the-theorem-says)
-   - [Why “up to normalization”?](#why-up-to-normalization)
+5. [Theorem spotlight: certified WGSL Blelloch scan end-to-end](#theorem-spotlight-certified-wgsl-blelloch-scan-end-to-end)
+   - [What the theorem says (now, for the emitted WGSL)](#what-the-theorem-says-now-for-the-emitted-wgsl)
+   - [Why "up to normalization"?](#why-up-to-normalization)
    - [Where the pieces live (code map)](#where-the-pieces-live-code-map)
    - [Proof sketch and how the parts compose](#proof-sketch-and-how-the-parts-compose)
    - [How to reproduce / inspect in Lean](#how-to-reproduce--inspect-in-lean)
 
 6. [Current status](#current-status)
-7. [What’s next: WebGPU Shading Language emission and running on hardware](#whats-next-webgpu-shading-language-emission-and-running-on-hardware)
+7. [What's next: WebGPU Shading Language emission and running on hardware](#whats-next-webgpu-shading-language-emission-and-running-on-hardware)
 8. [References](#references)
 9. [Appendix: Key definitions](#appendix-key-definitions-as-implemented)
 
@@ -65,48 +65,6 @@ lake build WGSL      # WGSL AST + footprint + certified emitter
 # run the executable kernel harness once proofs/build succeed
 cargo test -p wgsl-harness --manifest-path wgsl-harness/Cargo.toml
 ```
-
-### Running the WGSL harness
-
-The Rust harness in `wgsl-harness/` uses `build.rs` to call `lake exe emitWGSL`
-and drops the certified kernel at `wgsl-harness/.generated/kernel.wgsl`. Every
-`cargo build`/`cargo test` automatically refreshes this artifact and exports the
-absolute path via `WGSL_KERNEL_PATH`, so you do **not** need to run the Lean
-emitter manually.
-
-To execute the end-to-end GPU test (which uploads a 256-element array, runs the
-certified scan, and checks the exclusive prefix sums), simply run:
-
-```bash
-cargo test --manifest-path wgsl-harness/Cargo.toml
-```
-
-Ensure you have a WebGPU-capable runtime (wgpu will fall back to software if
-needed). The test named `computes_exclusive_scan` should pass and mirrors the
-WGSL produced by the proofs.
-
-Prefer a browser demo? Serve `wgsl-harness/index.html` (for example,
-`python -m http.server --directory wgsl-harness`) and open it in a recent
-Chrome/Edge/Safari build with WebGPU enabled. The page fetches the certified
-`./.generated/kernel.wgsl`, dispatches it via the WebGPU API, and prints the GPU
-exclusive-scan output alongside a CPU baseline.
-
-### GitHub Pages demo
-
-The repository also contains a pre-packaged copy of the harness under `docs/`
-so GitHub Pages can host it directly:
-
-```bash
-# Regenerate the certified WGSL artifact before pushing:
-lake exe emitWGSL docs/kernel.wgsl
-
-# (optional) preview locally
-uv run python -m http.server --directory docs 9000
-```
-
-Push to `main` (with Pages configured to serve from `/docs`). Visit
-`https://<user>.github.io/verified-gpu/` to exercise the same WebGPU scan in the
-browser—no extra backend needed.
 
 Repository layout (high‑level):
 
@@ -243,7 +201,7 @@ Typing is not just bookkeeping — it enforces absence of data races:
 
 ---
 
-## Theorem spotlight: certified WGSL Blelloch scan (end-to-end)
+## Theorem spotlight: certified WGSL Blelloch scan end-to-end
 
 ### What the theorem says (now, for the emitted WGSL)
 
@@ -325,9 +283,9 @@ and, independently:
 
 1. **IR certificate:** Prove `.for_threads (wgScanStmt offs)` with synthesized grade and show that grade normalizes to the spec (`hasGrade_forThreads_wgScanStmt_upToNorm`), using the affine lemmas plus the barrier-cut normalizer.
 2. **Codegen preservation:** Show that WGSL lowering/erasure preserves the IR grade (`emit_grade_eq_IR`, `cg_preserves_grade`).
-3. **Compose:** Conclude `CertifiedEmit_wgScan`: the *emitted WGSL* has the `HasGrade` judgment and matches the spec up to normalization.
+3. **Compose:** Conclude `CertifiedEmit_wgScan`: the _emitted WGSL_ has the `HasGrade` judgment and matches the spec up to normalization.
 
-**What this buys us.** The *artifact you run* (WGSL) is:
+**What this buys us.** The _artifact you run_ (WGSL) is:
 
 - **Race-free per phase** under `for_threads` (DRF side-conditions hold).
 - **Barrier-faithful** (barriers are explicit and never crossed by normalization).
@@ -415,4 +373,4 @@ _Pointers for code archeology_
 - `Kernel/Typing.lean`: typing rules, synthesis `gradeOf`, `PhasesSafe`
 - `Kernel/Lemmas/Affine.lean`: arithmetic facts for disjointness under guards
 - `Kernel/Examples/Blelloch.lean`: specification and intermediate representation of the Blelloch scan, normalization and absence‑of‑data‑races proofs (including the spotlight lemma)
-From there, the WGSL backend reuses the exact same inhabitant: `CertifiedEmit_wgScan` (in `WGSL/Codegen.lean`) states that the pretty-printed WGSL module produced from `wgScanStmt offs` carries the erased grade of the IR proof and that grade still matches the spec up to normalization. In short, the code you can hand to a WebGPU runtime is the one that satisfies the theorem above.
+  From there, the WGSL backend reuses the exact same inhabitant: `CertifiedEmit_wgScan` (in `WGSL/Codegen.lean`) states that the pretty-printed WGSL module produced from `wgScanStmt offs` carries the erased grade of the IR proof and that grade still matches the spec up to normalization. In short, the code you can hand to a WebGPU runtime is the one that satisfies the theorem above.
