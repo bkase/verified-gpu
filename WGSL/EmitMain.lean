@@ -50,6 +50,7 @@ def certifiedText : String :=
 def wgslSource : String :=
   "/* Certified WGSL (auto-generated):\n"
   ++ certifiedText ++ "\n*/\n\n"
+  ++ certifiedText
 
 def defaultOutputPath : System.FilePath :=
   "wgsl-harness" / ".generated" / "kernel.wgsl"
