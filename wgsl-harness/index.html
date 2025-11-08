@@ -63,10 +63,15 @@
           compute: { module, entryPoint: "main" },
         });
 
-        // Prepare input data: 0,1,2,…,255 for clarity.
+        // Prepare pseudo-random signed input data (stable per run).
         const laneCount = 256;
+        const raw = new Uint32Array(laneCount);
+        crypto.getRandomValues(raw);
         const data = new Int32Array(laneCount);
-        for (let i = 0; i < laneCount; ++i) data[i] = i;
+        for (let i = 0; i < laneCount; ++i) {
+          // Small range keeps sums readable and avoids overflow.
+          data[i] = (raw[i] % 21) - 10;
+        }
 
         // Storage buffer used by the certified kernel.
         const storageBuffer = device.createBuffer({
