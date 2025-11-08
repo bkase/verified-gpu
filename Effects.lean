@@ -332,6 +332,242 @@ lemma normalizeList_stage_pair (p q : Phase)
   simpa [normalizeList, List.cons_append]
       using normalizeList_stage_append (p := p) (q := q) (rest := []) hp hq
 
+lemma normalizeList_stage_triple (p q r : Phase)
+    (hp : p.empty = false) (hq : q.empty = false) (hr : r.empty = false) :
+    normalizeList ([p, q, r] ++ [⟨[], []⟩, ⟨[], []⟩])
+      = [Phase.fuse (Phase.fuse p q) r] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+  unfold normalizeList
+  have h1 :
+      normalizeList.loop none
+          (p :: q :: r :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some p)
+            (q :: r :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_none_cons_nonempty, hp]
+  have h2 :
+      normalizeList.loop (some p)
+          (q :: r :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some (Phase.fuse p q))
+            (r :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_some_cons_nonempty, hq]
+  have h3 :
+      normalizeList.loop (some (Phase.fuse p q))
+          (r :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+            (⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_some_cons_nonempty, hr]
+  have h4 :
+      normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+          (⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop none
+            (⟨[], []⟩ :: [])
+            ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩]) := by
+    simp [normalizeList_loop_some_cons_empty, Phase.empty, List.nil_append]
+  have h5 :
+      normalizeList.loop none
+          (⟨[], []⟩ :: [])
+          ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩])
+        = normalizeList.loop none []
+            ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩]) := by
+    simp [normalizeList_loop_none_cons_empty, Phase.empty, List.nil_append]
+  have hchain := (((h1.trans h2).trans h3).trans h4).trans h5
+  simpa [List.cons_append] using hchain
+
+lemma normalizeList_stage_triple_append (p q r : Phase) (rest : List Phase)
+    (hp : p.empty = false) (hq : q.empty = false) (hr : r.empty = false) :
+    normalizeList ([p, q, r] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest)
+      = [Phase.fuse (Phase.fuse p q) r] ++ [⟨[], []⟩, ⟨[], []⟩]
+          ++ normalizeList rest := by
+  unfold normalizeList
+  have hstep :
+      normalizeList.loop none
+          ([p, q, r] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest
+            ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩]) := by
+    have h1 :
+        normalizeList.loop none
+            (p :: q :: r :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some p)
+              (q :: r :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_none_cons_nonempty, hp]
+    have h2 :
+        normalizeList.loop (some p)
+            (q :: r :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some (Phase.fuse p q))
+              (r :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_some_cons_nonempty, hq]
+    have h3 :
+        normalizeList.loop (some (Phase.fuse p q))
+            (r :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+              (⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_some_cons_nonempty, hr]
+    have h4 :
+        normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+            (⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop none
+              (⟨[], []⟩ :: rest)
+              ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩]) := by
+      simp [normalizeList_loop_some_cons_empty, Phase.empty, List.nil_append]
+    have h5 :
+        normalizeList.loop none
+            (⟨[], []⟩ :: rest)
+            ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩])
+          = normalizeList.loop none rest
+              ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩]) := by
+      simp [normalizeList_loop_none_cons_empty, Phase.empty, List.nil_append]
+    simpa [List.cons_append]
+      using (h1.trans h2).trans (h3.trans (h4.trans h5))
+  have happ :
+      normalizeList.loop none rest
+          ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩])
+        = [Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList.loop none rest [] := by
+    simpa [List.nil_append] using
+      normalizeList_loop_none_append
+        (ps := rest)
+        (acc := [Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩])
+  calc
+    normalizeList.loop none
+        ([p, q, r] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest
+            ([Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩]) := hstep
+    _ = [Phase.fuse (Phase.fuse p q) r, ⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList.loop none rest [] := happ
+    _ = [Phase.fuse (Phase.fuse p q) r] ++ [⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList rest := by
+          simp [normalizeList]
+
+lemma normalizeList_stage_quad (p q r s : Phase)
+    (hp : p.empty = false) (hq : q.empty = false)
+    (hr : r.empty = false) (hs : s.empty = false) :
+    normalizeList ([p, q, r, s] ++ [⟨[], []⟩, ⟨[], []⟩])
+      = [Phase.fuse (Phase.fuse (Phase.fuse p q) r) s]
+          ++ [⟨[], []⟩, ⟨[], []⟩] := by
+  unfold normalizeList
+  have h1 :
+      normalizeList.loop none
+          (p :: q :: r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some p)
+            (q :: r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_none_cons_nonempty, hp]
+  have h2 :
+      normalizeList.loop (some p)
+          (q :: r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some (Phase.fuse p q))
+            (r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_some_cons_nonempty, hq]
+  have h3 :
+      normalizeList.loop (some (Phase.fuse p q))
+          (r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+            (s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_some_cons_nonempty, hr]
+  have h4 :
+      normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+          (s :: ⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop (some (Phase.fuse (Phase.fuse (Phase.fuse p q) r) s))
+            (⟨[], []⟩ :: ⟨[], []⟩ :: []) [] := by
+    simp [normalizeList_loop_some_cons_nonempty, hs]
+  have h5 :
+      normalizeList.loop (some (Phase.fuse (Phase.fuse (Phase.fuse p q) r) s))
+          (⟨[], []⟩ :: ⟨[], []⟩ :: []) []
+        = normalizeList.loop none
+            (⟨[], []⟩ :: [])
+            ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s, ⟨[], []⟩]) := by
+    simp [normalizeList_loop_some_cons_empty, Phase.empty, List.nil_append]
+  have h6 :
+      normalizeList.loop none
+          (⟨[], []⟩ :: [])
+          ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s, ⟨[], []⟩])
+        = normalizeList.loop none []
+            ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+              ⟨[], []⟩, ⟨[], []⟩]) := by
+    simp [normalizeList_loop_none_cons_empty, Phase.empty, List.nil_append]
+  have hchain := ((((h1.trans h2).trans h3).trans h4).trans h5).trans h6
+  simpa [List.cons_append] using hchain
+
+lemma normalizeList_stage_quad_append (p q r s : Phase) (rest : List Phase)
+    (hp : p.empty = false) (hq : q.empty = false)
+    (hr : r.empty = false) (hs : s.empty = false) :
+    normalizeList ([p, q, r, s] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest)
+      = [Phase.fuse (Phase.fuse (Phase.fuse p q) r) s]
+          ++ [⟨[], []⟩, ⟨[], []⟩]
+          ++ normalizeList rest := by
+  unfold normalizeList
+  have hstep :
+      normalizeList.loop none
+          ([p, q, r, s] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest
+            ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+              ⟨[], []⟩, ⟨[], []⟩]) := by
+    have h1 :
+        normalizeList.loop none
+            (p :: q :: r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some p)
+              (q :: r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_none_cons_nonempty, hp]
+    have h2 :
+        normalizeList.loop (some p)
+            (q :: r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some (Phase.fuse p q))
+              (r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_some_cons_nonempty, hq]
+    have h3 :
+        normalizeList.loop (some (Phase.fuse p q))
+            (r :: s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+              (s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_some_cons_nonempty, hr]
+    have h4 :
+        normalizeList.loop (some (Phase.fuse (Phase.fuse p q) r))
+            (s :: ⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop (some (Phase.fuse (Phase.fuse (Phase.fuse p q) r) s))
+              (⟨[], []⟩ :: ⟨[], []⟩ :: rest) [] := by
+      simp [normalizeList_loop_some_cons_nonempty, hs]
+    have h5 :
+        normalizeList.loop (some (Phase.fuse (Phase.fuse (Phase.fuse p q) r) s))
+            (⟨[], []⟩ :: ⟨[], []⟩ :: rest) []
+          = normalizeList.loop none
+              (⟨[], []⟩ :: rest)
+              ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s, ⟨[], []⟩]) := by
+      simp [normalizeList_loop_some_cons_empty, Phase.empty, List.nil_append]
+    have h6 :
+        normalizeList.loop none
+            (⟨[], []⟩ :: rest)
+            ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s, ⟨[], []⟩])
+          = normalizeList.loop none rest
+              ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+                ⟨[], []⟩, ⟨[], []⟩]) := by
+      simp [normalizeList_loop_none_cons_empty, Phase.empty, List.nil_append]
+    simpa [List.cons_append]
+      using
+        (h1.trans h2).trans ((h3.trans h4).trans (h5.trans h6))
+  have happ :
+      normalizeList.loop none rest
+          ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+            ⟨[], []⟩, ⟨[], []⟩])
+        = [Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+            ⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList.loop none rest [] := by
+    simpa [List.nil_append] using
+      normalizeList_loop_none_append
+        (ps := rest)
+        (acc := [Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+                ⟨[], []⟩, ⟨[], []⟩])
+  calc
+    normalizeList.loop none
+        ([p, q, r, s] ++ [⟨[], []⟩, ⟨[], []⟩] ++ rest) []
+        = normalizeList.loop none rest
+            ([Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+              ⟨[], []⟩, ⟨[], []⟩]) := hstep
+    _ = [Phase.fuse (Phase.fuse (Phase.fuse p q) r) s,
+            ⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList.loop none rest [] := happ
+    _ = [Phase.fuse (Phase.fuse (Phase.fuse p q) r) s]
+            ++ [⟨[], []⟩, ⟨[], []⟩]
+            ++ normalizeList rest := by
+          simp [normalizeList]
+
 /-! ### Normalizer cuts at the explicit barrier -/
 
 @[simp] lemma empty_canonical : (⟨[], []⟩ : Phase).empty = true := rfl

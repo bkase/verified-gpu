@@ -31,23 +31,24 @@ open LanguageQuantale
   , idx   := { a_tid := 1, a_off := 0, b := shift }
   , guard := g }
 
-/-- Phase for a single upsweep stage (read `tid + off - 1`, write `tid + 2*off - 1`). -/
+/-- Phase for a single upsweep stage (read both neighbors, then write the right one). -/
 def upsweepPhase (off : Nat) : Phase :=
-  let g := upsweepGuard off
-  let r := wgBuf "buf" (Int.ofNat off - 1) g
-  let w := wgBuf "buf" (2 * Int.ofNat off - 1) g
-  { reads := [r], writes := [w] }
+  let g  := upsweepGuard off
+  let rL := wgBuf "buf" (Int.ofNat off - 1) g
+  let rR := wgBuf "buf" (2 * Int.ofNat off - 1) g
+  let wR := rR
+  { reads := [rL, rR], writes := [wR] }
 
 /-- Grade for the upsweep stage: single phase plus a workgroup barrier. -/
 def gradeUpsweep (off : Nat) : Grade :=
   Word.ofList [upsweepPhase off] * Grade.ofBarrier
 
-/-- Phase for a single downsweep stage (writes `tid + off - 1` and `tid + 2*off - 1`). -/
+/-- Phase for a single downsweep stage: read right+left, then write left+right. -/
 def downsweepPhase (off : Nat) : Phase :=
-  let g := upsweepGuard off
-  let w1 := wgBuf "buf" (Int.ofNat off - 1) g
-  let w2 := wgBuf "buf" (2 * Int.ofNat off - 1) g
-  { reads := [], writes := [w1, w2] }
+  let g  := upsweepGuard off
+  let wL := wgBuf "buf" (Int.ofNat off - 1) g
+  let wR := wgBuf "buf" (2 * Int.ofNat off - 1) g
+  { reads := [wR, wL], writes := [wL, wR] }
 
 /-- Grade for the downsweep stage. -/
 def gradeDownsweep (off : Nat) : Grade :=
@@ -85,19 +86,26 @@ lemma upsweep_WritesDisjoint (off : Nat) :
 lemma upsweep_NoRAWIntra (off : Nat) (hoff : 0 < off) :
   NoRAWIntraPhase (upsweepPhase off) := by
   intro i j offV r w hr hw hi hj hij
-  have hr' :
-      r = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) := by
-    simpa [upsweepPhase] using hr
   have hw' :
       w = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by
     simpa [upsweepPhase] using hw
-  subst hr'
   subst hw'
-  have hi0 : i % (2 * off) = 0 := guard_mod_eq_zero hi
-  have hj0 : j % (2 * off) = 0 := guard_mod_eq_zero hj
-  refine Or.inr ?_
-  simpa [wgBuf, Aff2.eval] using
-    upsweep_guard_mixed_targets_ne hoff hi0 hj0
+  have hr_cases :
+      r = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) ∨
+      r = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by
+    simpa [upsweepPhase] using hr
+  rcases hr_cases with hrL | hrR
+  · subst hrL
+    have hi0 : i % (2 * off) = 0 :=
+      guard_mod_eq_zero (by simpa [upsweepPhase, wgBuf] using hi)
+    have hj0 : j % (2 * off) = 0 :=
+      guard_mod_eq_zero (by simpa [upsweepPhase, wgBuf] using hj)
+    exact Or.inr (by
+      simpa [wgBuf, Aff2.eval] using
+        upsweep_guard_mixed_targets_ne hoff hi0 hj0)
+  · subst hrR
+    exact Or.inr (by
+      simpa [wgBuf, Aff2.eval] using upsweep_index_distinct off hij)
 
 /-- Downsweep writes are pairwise distinct (cross-thread) when `off > 0`. -/
 lemma downsweep_WritesDisjoint (off : Nat) (hoff : 0 < off) :
@@ -123,11 +131,41 @@ lemma downsweep_WritesDisjoint (off : Nat) (hoff : 0 < off) :
   · subst ha; subst hb
     simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).right
 
-/-- Downsweep has no reads in this phase, so NoRAW is immediate. -/
-lemma downsweep_NoRAWIntra (off : Nat) :
+/-- Downsweep phase has only cross-thread RAW hazards; it is safe when `off > 0`. -/
+lemma downsweep_NoRAWIntra (off : Nat) (hoff : 0 < off) :
   NoRAWIntraPhase (downsweepPhase off) := by
-  intro i j offV r w hr _ _ _ _
-  cases hr
+  intro i j offV r w hr hw hi hj hij
+  have r_cases :
+      r = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) ∨
+      r = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) := by
+    simpa [downsweepPhase] using hr
+  have w_cases :
+      w = wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off) ∨
+      w = wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off) := by
+    simpa [downsweepPhase] using hw
+  rcases r_cases with rR | rL <;> rcases w_cases with wL | wR
+  · subst rR; subst wL
+    have hi0 : i % (2 * off) = 0 :=
+      guard_mod_eq_zero (by simpa [downsweepPhase, wgBuf] using hi)
+    have hj0 : j % (2 * off) = 0 :=
+      guard_mod_eq_zero (by simpa [downsweepPhase, wgBuf] using hj)
+    exact Or.inr (by
+      simpa [wgBuf, Aff2.eval] using
+        upsweep_guard_mixed_targets_ne_sym hoff hi0 hj0)
+  · subst rR; subst wR
+    exact Or.inr (by
+      simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).right)
+  · subst rL; subst wL
+    exact Or.inr (by
+      simpa [wgBuf, Aff2.eval] using (downsweep_index_distinct_both off hij).left)
+  · subst rL; subst wR
+    have hi0 : i % (2 * off) = 0 :=
+      guard_mod_eq_zero (by simpa [downsweepPhase, wgBuf] using hi)
+    have hj0 : j % (2 * off) = 0 :=
+      guard_mod_eq_zero (by simpa [downsweepPhase, wgBuf] using hj)
+    exact Or.inr (by
+      simpa [wgBuf, Aff2.eval] using
+        upsweep_guard_mixed_targets_ne hoff hi0 hj0)
 
 /-- Package upsweep safety facts. -/
 lemma upsweep_phase_safe (off : Nat) (hoff : 0 < off) :
@@ -139,7 +177,7 @@ lemma upsweep_phase_safe (off : Nat) (hoff : 0 < off) :
 lemma downsweep_phase_safe (off : Nat) (hoff : 0 < off) :
   WritesDisjointPhase (downsweepPhase off) ∧
   NoRAWIntraPhase (downsweepPhase off) :=
-  ⟨downsweep_WritesDisjoint off hoff, downsweep_NoRAWIntra off⟩
+  ⟨downsweep_WritesDisjoint off hoff, downsweep_NoRAWIntra off hoff⟩
 
 /-- Every phase in `gradeUpsweep off` satisfies the DRF side-conditions. -/
 lemma gradeUpsweep_safe (off : Nat) (hoff : 0 < off) :
@@ -655,22 +693,30 @@ open Kernel.Lemmas
   , base  := "buf"
   , idx   := { a_tid := 1, a_off := 0, b := shift } }
 
-/-- One upsweep stage as concrete IR: guarded load, then guarded store, then barrier. -/
+/-- One upsweep stage as concrete IR: load both neighbors, add, store back, barrier later. -/
 def upsweepBody (off : Nat) : Stmt :=
   let g  := upsweepGuard off
   let rL := wgLoc (Int.ofNat off - 1)
-  let wR := wgLoc (2 * Int.ofNat off - 1)
-  .ite g (.seq (.load rL "_tmp") (.store wR (.var "_tmp")))
+  let rR := wgLoc (2 * Int.ofNat off - 1)
+  .ite g (
+    .seq (.load rL "_lhs")
+    (.seq (.load rR "_rhs")
+    (.store rR (.add (.var "_lhs") (.var "_rhs")))))
 
 def upsweepStmt (off : Nat) : Stmt :=
   .seq (upsweepBody off) .barrier_wg
 
-/-- One downsweep stage as concrete IR: two guarded stores, then barrier. -/
+/-- One downsweep stage as concrete IR: load right+left, swap+cascade, then barrier. -/
 def downsweepBody (off : Nat) : Stmt :=
   let g  := upsweepGuard off
   let wL := wgLoc (Int.ofNat off - 1)
   let wR := wgLoc (2 * Int.ofNat off - 1)
-  .ite g (.seq (.store wL (.var "_a")) (.store wR (.var "_b")))
+  .ite g (
+    .seq (.load wR "_a")
+    (.seq (.load wL "_t")
+    (.seq (.let_ "_b" (.add (.var "_a") (.var "_t")))
+    (.seq (.store wL (.var "_a"))
+          (.store wR (.var "_b"))))))
 
 def downsweepStmt (off : Nat) : Stmt :=
   .seq (downsweepBody off) .barrier_wg
@@ -687,52 +733,70 @@ def wgDownsweepStmt (offs : List Nat) : Stmt :=
 def wgScanStmt (offs : List Nat) : Stmt :=
   .seq (wgUpsweepStmt offs) (wgDownsweepStmt offs)
 
-/-- IR grade for a single upsweep stage: guard-stamped read, then write, then barrier. -/
+/-- IR grade for a single upsweep stage: two reads, one write, then barrier. -/
 def gradeUpsweepIR (off : Nat) : Grade :=
   let g  := upsweepGuard off
-  let r  := asRead (wgLoc (Int.ofNat off - 1)) guardAll
-  let w  := asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll
-  Grade.seq (stampGrade (Grade.seq (Grade.ofRead r) (Grade.ofWrite w)) g) Grade.ofBarrier
+  let rL := asRead (wgLoc (Int.ofNat off - 1)) guardAll
+  let rR := asRead (wgLoc (2 * Int.ofNat off - 1)) guardAll
+  let wR := asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll
+  Grade.seq
+    (stampGrade
+      (Grade.seq (Grade.ofRead rL)
+        (Grade.seq (Grade.ofRead rR) (Grade.ofWrite wR))) g)
+    Grade.ofBarrier
 
-/-- IR grade for a single downsweep stage: two guarded writes, then barrier. -/
+/-- IR grade for a single downsweep stage: two reads, two writes, then barrier. -/
 def gradeDownsweepIR (off : Nat) : Grade :=
   let g  := upsweepGuard off
+  let rR := asRead  (wgLoc (2 * Int.ofNat off - 1)) guardAll
+  let rL := asRead  (wgLoc (Int.ofNat off - 1)) guardAll
   let wL := asWrite (wgLoc (Int.ofNat off - 1)) guardAll
   let wR := asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll
-  Grade.seq (stampGrade (Grade.seq (Grade.ofWrite wL) (Grade.ofWrite wR)) g) Grade.ofBarrier
+  Grade.seq
+    (stampGrade
+      (Grade.seq (Grade.ofRead rR)
+        (Grade.seq (Grade.ofRead rL)
+          (Grade.seq (Grade.ofWrite wL) (Grade.ofWrite wR)))) g)
+    Grade.ofBarrier
 
 lemma gradeUpsweepIR_normalizes (off : Nat) :
     Grade.normalize (gradeUpsweepIR off) = gradeUpsweep off := by
-  let p :=
+  let pL :=
     stampPhase ⟨[asRead (wgLoc (Int.ofNat off - 1)) guardAll], []⟩ (upsweepGuard off)
-  let q :=
+  let pR :=
+    stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat off - 1)) guardAll], []⟩ (upsweepGuard off)
+  let qW :=
     stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll]⟩ (upsweepGuard off)
-  have hp : Effects.Phase.empty p = false := by
-    simp [p]
-  have hq : Effects.Phase.empty q = false := by
-    simp [q]
-  have hfuse : Phase.fuse p q = upsweepPhase off := by
-    simp [p, q, Phase.fuse, stampPhase, upsweepPhase, wgLoc, wgBuf, asRead, asWrite,
+  have hpL : Effects.Phase.empty pL = false := by
+    simp [pL]
+  have hpR : Effects.Phase.empty pR = false := by
+    simp [pR]
+  have hqW : Effects.Phase.empty qW = false := by
+    simp [qW]
+  have hfuse : Phase.fuse (Phase.fuse pL pR) qW = upsweepPhase off := by
+    simp [pL, pR, qW, Phase.fuse, stampPhase, upsweepPhase, wgLoc, wgBuf, asRead, asWrite,
           List.append_nil, List.nil_append]
   have hshape :
       ((gradeUpsweepIR off) : List Phase)
-        = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-    simp [gradeUpsweepIR, p, q, Grade.seq, stampGrade,
+        = [pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+    simp [gradeUpsweepIR, pL, pR, qW, Grade.seq, stampGrade,
           Grade.ofRead, Grade.ofWrite, Grade.ofBarrier]
   have hnormList :
       ((Grade.normalize (gradeUpsweepIR off)) : List Phase)
-        = normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+        = normalizeList ([pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
     calc
       ((Grade.normalize (gradeUpsweepIR off)) : List Phase)
           = normalizeList ((gradeUpsweepIR off).toList) :=
             Grade.toList_normalize (gradeUpsweepIR off)
-      _ = normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+      _ = normalizeList ([pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
             simp [hshape]
   have hnorm :
       ((Grade.normalize (gradeUpsweepIR off)) : List Phase)
-        = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] :=
+        = [Phase.fuse (Phase.fuse pL pR) qW]
+            ++ [⟨[], []⟩, ⟨[], []⟩] :=
     hnormList.trans
-      (Effects.Grade.normalizeList_stage_pair (p := p) (q := q) hp hq)
+      (Effects.Grade.normalizeList_stage_triple
+        (p := pL) (q := pR) (r := qW) hpL hpR hqW)
   have hrhs :
       ((gradeUpsweep off) : List Phase)
         = [upsweepPhase off] ++ [⟨[], []⟩, ⟨[], []⟩] := by
@@ -740,42 +804,50 @@ lemma gradeUpsweepIR_normalizes (off : Nat) :
   refine Word.ext ?_
   calc
     ((Grade.normalize (gradeUpsweepIR off)) : List Phase)
-        = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] := hnorm
+        = [Phase.fuse (Phase.fuse pL pR) qW]
+            ++ [⟨[], []⟩, ⟨[], []⟩] := hnorm
     _ = [upsweepPhase off] ++ [⟨[], []⟩, ⟨[], []⟩] := by simp [hfuse]
     _ = ((gradeUpsweep off) : List Phase) := hrhs.symm
 
 lemma gradeDownsweepIR_normalizes (off : Nat) :
     Grade.normalize (gradeDownsweepIR off) = gradeDownsweep off := by
-  let p :=
+  let pR :=
+    stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat off - 1)) guardAll], []⟩ (upsweepGuard off)
+  let pL :=
+    stampPhase ⟨[asRead (wgLoc (Int.ofNat off - 1)) guardAll], []⟩ (upsweepGuard off)
+  let qL :=
     stampPhase ⟨[], [asWrite (wgLoc (Int.ofNat off - 1)) guardAll]⟩ (upsweepGuard off)
-  let q :=
+  let qR :=
     stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll]⟩ (upsweepGuard off)
-  have hp : Effects.Phase.empty p = false := by
-    simp [p]
-  have hq : Effects.Phase.empty q = false := by
-    simp [q]
-  have hfuse : Phase.fuse p q = downsweepPhase off := by
-    simp [p, q, Phase.fuse, stampPhase, downsweepPhase, wgLoc, wgBuf, asWrite,
-          List.append_nil, List.nil_append]
+  have hpR : Effects.Phase.empty pR = false := by simp [pR]
+  have hpL : Effects.Phase.empty pL = false := by simp [pL]
+  have hqL : Effects.Phase.empty qL = false := by simp [qL]
+  have hqR : Effects.Phase.empty qR = false := by simp [qR]
+  have hfuse : Phase.fuse (Phase.fuse (Phase.fuse pR pL) qL) qR
+      = downsweepPhase off := by
+    simp [pR, pL, qL, qR, Phase.fuse, stampPhase, downsweepPhase,
+          wgLoc, wgBuf, asRead, asWrite, List.append_nil, List.nil_append]
   have hshape :
       ((gradeDownsweepIR off) : List Phase)
-        = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-    simp [gradeDownsweepIR, p, q, Grade.seq, stampGrade,
-          Grade.ofWrite, Grade.ofBarrier]
+        = [pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+    simp [gradeDownsweepIR, pR, pL, qL, qR, Grade.seq, stampGrade,
+          Grade.ofRead, Grade.ofWrite, Grade.ofBarrier]
   have hnormList :
       ((Grade.normalize (gradeDownsweepIR off)) : List Phase)
-        = normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+        = normalizeList ([pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
     calc
       ((Grade.normalize (gradeDownsweepIR off)) : List Phase)
           = normalizeList ((gradeDownsweepIR off).toList) :=
             Grade.toList_normalize (gradeDownsweepIR off)
-      _ = normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+      _ = normalizeList ([pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
             simp [hshape]
   have hnorm :
       ((Grade.normalize (gradeDownsweepIR off)) : List Phase)
-        = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] :=
+        = [Phase.fuse (Phase.fuse (Phase.fuse pR pL) qL) qR]
+            ++ [⟨[], []⟩, ⟨[], []⟩] :=
     hnormList.trans
-      (Effects.Grade.normalizeList_stage_pair (p := p) (q := q) hp hq)
+      (Effects.Grade.normalizeList_stage_quad
+        (p := pR) (q := pL) (r := qL) (s := qR) hpR hpL hqL hqR)
   have hrhs :
       ((gradeDownsweep off) : List Phase)
         = [downsweepPhase off] ++ [⟨[], []⟩, ⟨[], []⟩] := by
@@ -783,7 +855,8 @@ lemma gradeDownsweepIR_normalizes (off : Nat) :
   refine Word.ext ?_
   calc
     ((Grade.normalize (gradeDownsweepIR off)) : List Phase)
-        = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] := hnorm
+        = [Phase.fuse (Phase.fuse (Phase.fuse pR pL) qL) qR]
+            ++ [⟨[], []⟩, ⟨[], []⟩] := hnorm
     _ = [downsweepPhase off] ++ [⟨[], []⟩, ⟨[], []⟩] := by simp [hfuse]
     _ = ((gradeDownsweep off) : List Phase) := hrhs.symm
 
@@ -806,21 +879,25 @@ lemma gradeUpsweepsIR_normalizes (offs : List Nat) :
   | nil =>
       simp [gradeUpsweepsIR, WG.gradeUpsweeps, Grade.eps]
   | cons o os ih =>
-      let p :=
+      let pL :=
         stampPhase ⟨[asRead (wgLoc (Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
-      let q :=
+      let pR :=
+        stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+      let qW :=
         stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-      have hp : Effects.Phase.empty p = false := by
-        simp [p]
-      have hq : Effects.Phase.empty q = false := by
-        simp [q]
-      have hfuse : Phase.fuse p q = upsweepPhase o := by
-        simp [p, q, Phase.fuse, stampPhase, upsweepPhase, wgLoc, wgBuf, asRead, asWrite,
+      have hpL : Effects.Phase.empty pL = false := by
+        simp [pL]
+      have hpR : Effects.Phase.empty pR = false := by
+        simp [pR]
+      have hqW : Effects.Phase.empty qW = false := by
+        simp [qW]
+      have hfuse : Phase.fuse (Phase.fuse pL pR) qW = upsweepPhase o := by
+        simp [pL, pR, qW, Phase.fuse, stampPhase, upsweepPhase, wgLoc, wgBuf, asRead, asWrite,
               List.append_nil, List.nil_append]
       have hstage :
           ((gradeUpsweepIR o) : List Phase)
-            = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-        simp [gradeUpsweepIR, p, q, Grade.seq, stampGrade,
+            = [pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+        simp [gradeUpsweepIR, pL, pR, qW, Grade.seq, stampGrade,
               Grade.ofRead, Grade.ofWrite, Grade.ofBarrier]
       have hseq :
           ((gradeUpsweepsIR (o :: os)) : List Phase)
@@ -829,32 +906,33 @@ lemma gradeUpsweepsIR_normalizes (offs : List Nat) :
         simp [gradeUpsweepsIR, Grade.seq]
       have hshape :
           ((gradeUpsweepsIR (o :: os)) : List Phase)
-            = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩]
+            = [pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                 ++ (gradeUpsweepsIR os : List Phase) := by
         calc
           ((gradeUpsweepsIR (o :: os)) : List Phase)
               = (gradeUpsweepIR o : List Phase)
                   ++ (gradeUpsweepsIR os : List Phase) := hseq
-          _ = ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩])
+          _ = ([pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩])
                   ++ (gradeUpsweepsIR os : List Phase) := by
                 simp [hstage]
-          _ = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩]
+          _ = [pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                   ++ (gradeUpsweepsIR os : List Phase) :=
-            List.append_assoc [p, q] [⟨[], []⟩, ⟨[], []⟩]
+            List.append_assoc [pL, pR, qW] [⟨[], []⟩, ⟨[], []⟩]
               (gradeUpsweepsIR os : List Phase)
       have hnormList :
           normalizeList ((gradeUpsweepsIR (o :: os)).toList)
-            = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+            = [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                 ++ normalizeList ((gradeUpsweepsIR os).toList) := by
         calc
           normalizeList ((gradeUpsweepsIR (o :: os)).toList)
-              = normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩]
+              = normalizeList ([pL, pR, qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                   ++ (gradeUpsweepsIR os : List Phase)) := by
                     simp [hshape]
-          _ = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+          _ = [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                   ++ normalizeList ((gradeUpsweepsIR os).toList) :=
-                Effects.Grade.normalizeList_stage_append
-                  (p := p) (q := q) (rest := (gradeUpsweepsIR os).toList) hp hq
+                Effects.Grade.normalizeList_stage_triple_append
+                  (p := pL) (q := pR) (r := qW)
+                  (rest := (gradeUpsweepsIR os).toList) hpL hpR hqW
       have hrest :
           normalizeList ((gradeUpsweepsIR os).toList)
             = ((WG.gradeUpsweeps os) : List Phase) := by
@@ -863,15 +941,15 @@ lemma gradeUpsweepsIR_normalizes (offs : List Nat) :
         exact hnormEq.symm.trans hi
       have hnorm :
           ((Grade.normalize (gradeUpsweepsIR (o :: os))) : List Phase)
-            = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+            = [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                 ++ ((WG.gradeUpsweeps os) : List Phase) := by
         calc
           ((Grade.normalize (gradeUpsweepsIR (o :: os))) : List Phase)
               = normalizeList ((gradeUpsweepsIR (o :: os)).toList) :=
                 Grade.toList_normalize (gradeUpsweepsIR (o :: os))
-          _ = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+          _ = [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                   ++ normalizeList ((gradeUpsweepsIR os).toList) := hnormList
-          _ = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+          _ = [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                   ++ ((WG.gradeUpsweeps os) : List Phase) := by
                 simp [hrest]
       have hrhs :
@@ -892,7 +970,7 @@ lemma gradeUpsweepsIR_normalizes (offs : List Nat) :
               [⟨[], []⟩, ⟨[], []⟩]
               ((WG.gradeUpsweeps os) : List Phase)
       have hw :
-          [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+          [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
               ++ ((WG.gradeUpsweeps os) : List Phase)
             = [upsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩]
               ++ ((WG.gradeUpsweeps os) : List Phase) := by
@@ -900,7 +978,7 @@ lemma gradeUpsweepsIR_normalizes (offs : List Nat) :
       refine Word.ext ?_
       calc
         ((Grade.normalize (gradeUpsweepsIR (o :: os))) : List Phase)
-            = [Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]
+            = [Phase.fuse (Phase.fuse pL pR) qW] ++ [⟨[], []⟩, ⟨[], []⟩]
                 ++ ((WG.gradeUpsweeps os) : List Phase) := hnorm
         _ = [upsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩]
                 ++ ((WG.gradeUpsweeps os) : List Phase) := hw
@@ -914,12 +992,14 @@ lemma gradeUpsweepsIR_endsWith_barrier :
 | [o], _        =>
   by
     -- one stage: expose the two stamped phases
-    let p :=
+    let pL :=
       stampPhase ⟨[asRead (wgLoc (Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
-    let q :=
+    let pR :=
+      stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+    let qW :=
       stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-    refine ⟨[p, q], ?_⟩
-    simp [gradeUpsweepsIR, Grade.seq, gradeUpsweepIR, p, q,
+    refine ⟨[pL, pR, qW], ?_⟩
+    simp [gradeUpsweepsIR, Grade.seq, gradeUpsweepIR, pL, pR, qW,
           stampGrade, Grade.ofRead, Grade.ofWrite, Grade.ofBarrier, Grade.eps]
 | o :: o' :: os, _ =>
   by
@@ -947,28 +1027,37 @@ lemma gradeDownsweepsIR_endsWith_barrier :
 | [o], _        =>
   by
     -- one stage: expose the two stamped writes
-    let p :=
+    let pR :=
+      stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+    let pL :=
+      stampPhase ⟨[asRead (wgLoc (Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+    let qL :=
       stampPhase ⟨[], [asWrite (wgLoc (Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-    let q :=
+    let qR :=
       stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-    refine ⟨[p, q], ?_⟩
-    simp [gradeDownsweepsIR, Grade.seq, gradeDownsweepIR, p, q,
-          stampGrade, Grade.ofWrite, Grade.ofBarrier, Grade.eps]
+    refine ⟨[pR, pL, qL, qR], ?_⟩
+    simp [gradeDownsweepsIR, Grade.seq, gradeDownsweepIR, pR, pL, qL, qR,
+          stampGrade, Grade.ofRead, Grade.ofWrite, Grade.ofBarrier, Grade.eps]
 | o :: o' :: os, _ =>
   by
     -- chain = (left) ++ (single stage on o)
-    let p :=
+    let pR :=
+      stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+    let pL :=
+      stampPhase ⟨[asRead (wgLoc (Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+    let qL :=
       stampPhase ⟨[], [asWrite (wgLoc (Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-    let q :=
+    let qR :=
       stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
     have hstage :
         ((gradeDownsweepIR o) : List Effects.Phase)
-          = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-      simp [gradeDownsweepIR, p, q, Grade.seq, stampGrade, Grade.ofWrite, Grade.ofBarrier]
-    refine ⟨(gradeDownsweepsIR (o' :: os) : List _) ++ [p, q], ?_⟩
+          = [pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+      simp [gradeDownsweepIR, pR, pL, qL, qR, Grade.seq, stampGrade,
+            Grade.ofRead, Grade.ofWrite, Grade.ofBarrier]
+    refine ⟨(gradeDownsweepsIR (o' :: os) : List _) ++ [pR, pL, qL, qR], ?_⟩
     simp [gradeDownsweepsIR, Grade.seq, hstage, List.append_assoc]
 
-/-- (1) The downsweep IR chain collapses under `Grade.normalize`
+/-/ (1) The downsweep IR chain collapses under `Grade.normalize`
     to the abstract downsweep grade. -/
 lemma gradeDownsweepsIR_normalizes (offs : List Nat) :
   Grade.normalize (gradeDownsweepsIR offs) = WG.gradeDownsweeps offs := by
@@ -976,187 +1065,119 @@ lemma gradeDownsweepsIR_normalizes (offs : List Nat) :
   | nil =>
       simp [gradeDownsweepsIR, WG.gradeDownsweeps, Grade.eps]
   | cons o os ih =>
-      -- Work on lists via `toList_normalize`.
-      have L :
-          ((Grade.normalize (gradeDownsweepsIR (o :: os))) : List Effects.Phase)
-            = Grade.normalizeList
-                ((gradeDownsweepsIR os : List _) ++ (gradeDownsweepIR o : List _)) := by
-        simp [Effects.Grade.toList_normalize, gradeDownsweepsIR, Grade.seq]
-      -- expose the single-stage on the right
-      let p :=
-        stampPhase ⟨[], [asWrite (wgLoc (Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-      let q :=
-        stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
-      have hstage :
-          ((gradeDownsweepIR o) : List Effects.Phase)
-            = [p, q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-        simp [gradeDownsweepIR, p, q, Grade.seq, stampGrade, Grade.ofWrite, Grade.ofBarrier]
-      -- split on `os`
       cases os with
       | nil =>
-          -- direct single-stage collapse
-          have hp : p.empty = false := by
-            simp [p, Effects.Phase.empty, stampPhase]
-          have hq : q.empty = false := by
-            simp [q, Effects.Phase.empty, stampPhase]
-          have collapse :
-            Grade.normalizeList ((gradeDownsweepsIR [] : List _) ++ (gradeDownsweepIR o : List _))
-              = [Effects.Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-            simpa [gradeDownsweepsIR, Grade.eps, List.nil_append, hstage]
-              using Effects.Grade.normalizeList_stage_pair (p := p) (q := q) hp hq
-
-            -- RHS normalized word for the singleton abstract chain
-          have R :
-            ((Grade.normalize (WG.gradeDownsweeps [o])) : List _)
-              = [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-            -- `downsweepPhase o` is non-empty (has two writes)
-            have hp2 : (downsweepPhase o).empty = false := by
-              simp [downsweepPhase, Effects.Phase.empty, wgBuf]
-
-            -- compute as lists, then normalize the singleton+barrier explicitly
-            calc
-              ((Grade.normalize (WG.gradeDownsweeps [o])) : List _)
-                  = Effects.Grade.normalizeList ((WG.gradeDownsweeps [o]).toList) := by
-                      exact Effects.Grade.toList_normalize (WG.gradeDownsweeps [o])
-              _ = Effects.Grade.normalizeList
-                    ((Grade.eps : Effects.Grade).toList ++ (gradeDownsweep o : List _)) := by
-                      simp [WG.gradeDownsweeps, Grade.seq]
-              _ = Effects.Grade.normalizeList
-                    ([downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
-                      simp [Grade.eps, gradeDownsweep, Grade.ofBarrier, List.nil_append]
-              _ = [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] :=
-                Effects.Grade.normalizeList_single_nonempty_barrier _ hp2
-          have fuse_eq : Effects.Phase.fuse p q = downsweepPhase o := by
-            simp [downsweepPhase, p, q, Effects.Phase.fuse, stampPhase,
-                  wgLoc, wgBuf, asWrite, upsweepGuard]
-
-                    -- We need: normalizeList (gradeDownsweepsIR [o]).toList
-          --           = (WG.gradeDownsweeps [o]).toList
-
-          -- 1) Use L and collapse to get the normalized LHS as a list
-          --    ((normalize (gradeDownsweepsIR [o])) : List) = [p⋈q] ++ B
-          have Lnorm :
-            ((Grade.normalize (gradeDownsweepsIR [o])) : List _)
-              = [Effects.Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] :=
-            L.trans collapse
-
-          -- 2) Convert to the exact goal’s LHS shape (normalizeList … .toList)
-          have Llhs :
-            Grade.normalizeList (gradeDownsweepsIR [o]).toList
-              = [Effects.Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-            simpa [Effects.Grade.toList_normalize] using Lnorm
-
-          -- 3) Identify the fused phase with the spec phase
-          have Llhs' :
-            Grade.normalizeList (gradeDownsweepsIR [o]).toList
-              = [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-            simpa [fuse_eq]
-
-          -- 4) Compute the raw abstract RHS list once
-          have Rshape :
-            ((WG.gradeDownsweeps [o]) : List _)
-              = [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-            simp [ WG.gradeDownsweeps
-                 , Grade.seq
-                 , gradeDownsweep
-                 , Grade.ofBarrier
-                 , Grade.eps
-                 , List.nil_append ]
-
-          apply LanguageQuantale.Word.ext
-          simpa [Effects.Grade.toList_normalize] using (Llhs'.trans Rshape.symm)
+          -- single stage: reuse the one-stage normalization lemma
+          simpa [gradeDownsweepsIR, WG.gradeDownsweeps, Grade.seq, Grade.eps]
+            using gradeDownsweepIR_normalizes o
       | cons o' os' =>
-          -- prefix ends with a barrier: cut in the middle, then fold IH and single-stage collapse
+          -- expose the trailing downsweep stage for `o`
+          let pR :=
+            stampPhase ⟨[asRead (wgLoc (2 * Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+          let pL :=
+            stampPhase ⟨[asRead (wgLoc (Int.ofNat o - 1)) guardAll], []⟩ (upsweepGuard o)
+          let qL :=
+            stampPhase ⟨[], [asWrite (wgLoc (Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
+          let qR :=
+            stampPhase ⟨[], [asWrite (wgLoc (2 * Int.ofNat o - 1)) guardAll]⟩ (upsweepGuard o)
+          have hpR : Effects.Phase.empty pR = false := by simp [pR]
+          have hpL : Effects.Phase.empty pL = false := by simp [pL]
+          have hqL : Effects.Phase.empty qL = false := by simp [qL]
+          have hqR : Effects.Phase.empty qR = false := by simp [qR]
+          have hfuse :
+              Phase.fuse (Phase.fuse (Phase.fuse pR pL) qL) qR
+                = downsweepPhase o := by
+            simp [pR, pL, qL, qR, downsweepPhase, Phase.fuse, stampPhase,
+                  wgLoc, wgBuf, asRead, asWrite, List.append_nil, List.nil_append]
+          have hstage :
+              ((gradeDownsweepIR o) : List Effects.Phase)
+                = [pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+            simp [gradeDownsweepIR, pR, pL, qL, qR, Grade.seq, stampGrade,
+                  Grade.ofRead, Grade.ofWrite, Grade.ofBarrier]
+          -- tail chunk ends with the explicit barrier
           rcases gradeDownsweepsIR_endsWith_barrier (o' :: os') (by simp) with ⟨xs0, hx⟩
-          -- cut at the middle barrier, then collapse the right stage
-          have cut :
-            Effects.Grade.normalizeList
-              ((gradeDownsweepsIR (o' :: os') : List _)
-                ++ (gradeDownsweepIR o : List _))
-            = Effects.Grade.normalizeList xs0
-                ++ [⟨[], []⟩, ⟨[], []⟩]
-                ++ Effects.Grade.normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
-            simpa [hx, hstage, List.append_assoc]
-              using Effects.Grade.normalizeList_barrier_middle_append xs0
-                    ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩])
-
-          have hp : p.empty = false := by
-            simp [p, stampPhase, Effects.Phase.empty]
-          have hq : q.empty = false := by
-            simp [q, stampPhase, Effects.Phase.empty]
-
-          have rightChunk :
-            Effects.Grade.normalizeList ([p, q] ++ [⟨[], []⟩, ⟨[], []⟩])
-              = [Effects.Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩] :=
-            Effects.Grade.normalizeList_stage_pair (p := p) (q := q) hp hq
-
-          -- IH converted to a list equality
-          have IHlist :
-            Effects.Grade.normalizeList ((gradeDownsweepsIR (o' :: os')).toList)
-              = ((WG.gradeDownsweeps (o' :: os')) : List _) := by
-            have := congrArg LanguageQuantale.Word.toList (by simpa using ih)
-            simpa using this
-
-          -- pack the left chunk using the right-append barrier lemma + IH
-          have pack :
-            Effects.Grade.normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
-              = Effects.Grade.normalizeList (xs0 ++ [⟨[], []⟩, ⟨[], []⟩]) :=
-            (Effects.Grade.normalizeList_append_barrier_right xs0).symm
-
-          have hx_norm :
-            Effects.Grade.normalizeList (xs0 ++ [⟨[], []⟩, ⟨[], []⟩])
-              = Effects.Grade.normalizeList ((gradeDownsweepsIR (o' :: os')).toList) :=
-            (congrArg Effects.Grade.normalizeList hx).symm
-
-          have leftPacked :
-            Effects.Grade.normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
-              = ((WG.gradeDownsweeps (o' :: os')) : List _) :=
-            pack.trans (hx_norm.trans IHlist)
-
-          -- Combine with the L you already have:
-          --   L : ((normalize … (o :: o' :: os')) : List _) =
-          --       normalizeList ( (gradeDownsweepsIR (o' :: os')).toList
-          --                       ++ (gradeDownsweepIR o).toList )
-          -- collapse the right stage in `cut`
-          have cut2 :
-            ((Effects.Grade.normalize (gradeDownsweepsIR (o :: o' :: os'))) : List _)
-              = (Effects.Grade.normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩])
-                  ++ ([Effects.Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
-            -- bring `cut` to the shape of the left-hand side via `L`
-            have tmp :
-              Effects.Grade.normalizeList
-                (((gradeDownsweepsIR (o' :: os')) : List _)
-                  ++ (gradeDownsweepIR o : List _))
-                = Effects.Grade.normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
-                    ++ ([Effects.Phase.fuse p q] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
-              simpa [rightChunk, List.append_assoc] using cut
-            simpa [L] using tmp
-
-          -- identify the fused phase with the spec phase
-          have fuse_eq : Effects.Phase.fuse p q = downsweepPhase o := by
-            simp [downsweepPhase, p, q, Effects.Phase.fuse, stampPhase,
-                  wgLoc, wgBuf, asWrite, upsweepGuard]
-
-          -- Final left-hand normalized list:
-          have LHS :
-            ((Effects.Grade.normalize (gradeDownsweepsIR (o :: o' :: os'))) : List _)
-              = ((WG.gradeDownsweeps (o' :: os')) : List _)
-                  ++ [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
-            simpa [leftPacked, fuse_eq, List.append_assoc] using cut2
-
-          have Rshape :
-            ((WG.gradeDownsweeps (o :: o' :: os')) : List _)
-              = ((WG.gradeDownsweeps (o' :: os')) : List _)
-                  ++ [downsweepPhase o] ++ [⟨[],[]⟩,⟨[],[]⟩] := by
-            simp [ WG.gradeDownsweeps
-                , Grade.seq
-                , gradeDownsweep
-                , Grade.ofBarrier
-                , List.append_assoc ]
-
-          -- done
-          apply LanguageQuantale.Word.ext
-          exact LHS.trans Rshape.symm
+          have hdecomp :
+              ((gradeDownsweepsIR (o :: o' :: os')) : List Effects.Phase)
+                = (gradeDownsweepsIR (o' :: os') : List _)
+                    ++ (gradeDownsweepIR o : List _) := by
+            simp [gradeDownsweepsIR, Grade.seq, List.append_assoc]
+          have hconcat :
+              ((gradeDownsweepsIR (o :: o' :: os')) : List Effects.Phase)
+                = xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
+                    ++ [pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+            calc
+              ((gradeDownsweepsIR (o :: o' :: os')) : List _) =
+                  (gradeDownsweepsIR (o' :: os') : List _)
+                      ++ (gradeDownsweepIR o : List _) := hdecomp
+              _ = (xs0 ++ [⟨[], []⟩, ⟨[], []⟩])
+                      ++ ([pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+                    simp [hx, hstage, List.append_assoc]
+              _ = xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
+                      ++ [pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+                    simp [List.append_assoc]
+          -- normalize the concatenation by cutting at the middle barrier
+          have hnormList :
+              normalizeList ((gradeDownsweepsIR (o :: o' :: os')) : List Effects.Phase)
+                = normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
+                    ++ normalizeList ([pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+            simpa [hconcat]
+              using Effects.Grade.normalizeList_barrier_middle_append
+                (xs := xs0)
+                (ys := [pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩])
+          -- identify the right chunk with the spec downsweep phase
+          have hstageNorm :
+              normalizeList ([pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩])
+                = [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+            simpa [hfuse]
+              using Effects.Grade.normalizeList_stage_quad
+                (p := pR) (q := pL) (r := qL) (s := qR) hpR hpL hqL hqR
+          -- normalize the tail chunk via the induction hypothesis
+          have htail_norm :
+              normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
+                = ((WG.gradeDownsweeps (o' :: os')) : List _) := by
+            have h_rest_norm :
+                normalizeList ((gradeDownsweepsIR (o' :: os')).toList)
+                  = ((WG.gradeDownsweeps (o' :: os')) : List _) := by
+              have := congrArg LanguageQuantale.Word.toList (by simpa using ih)
+              simpa [Effects.Grade.toList_normalize] using this
+            have hx_norm :
+                normalizeList ((gradeDownsweepsIR (o' :: os')).toList)
+                  = normalizeList (xs0 ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+              simpa using congrArg normalizeList hx
+            have hnormalized :
+                normalizeList (xs0 ++ [⟨[], []⟩, ⟨[], []⟩])
+                  = ((WG.gradeDownsweeps (o' :: os')) : List _) :=
+              hx_norm.symm.trans h_rest_norm
+            simpa [Effects.Grade.normalizeList_append_barrier_right xs0]
+              using hnormalized
+          -- gather everything back into word equality
+          have htotal_list :
+              ((Grade.normalize (gradeDownsweepsIR (o :: o' :: os'))) : List _)
+                = ((WG.gradeDownsweeps (o' :: os')) : List _)
+                    ++ [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+            calc
+              ((Grade.normalize (gradeDownsweepsIR (o :: o' :: os'))) : List _)
+                  = normalizeList ((gradeDownsweepsIR (o :: o' :: os')).toList) := by
+                        simp [Effects.Grade.toList_normalize]
+              _ = normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
+                      ++ normalizeList ([pR, pL, qL, qR] ++ [⟨[], []⟩, ⟨[], []⟩]) :=
+                    hnormList
+              _ = normalizeList xs0 ++ [⟨[], []⟩, ⟨[], []⟩]
+                      ++ ([downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+                    simpa [hstageNorm]
+              _ = ((WG.gradeDownsweeps (o' :: os')) : List _)
+                      ++ ([downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩]) := by
+                    simp [htail_norm]
+              _ = ((WG.gradeDownsweeps (o' :: os')) : List _)
+                      ++ [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+                    simp [List.append_assoc]
+          have hspec_list :
+              ((WG.gradeDownsweeps (o :: o' :: os')) : List _)
+                = ((WG.gradeDownsweeps (o' :: os')) : List _)
+                    ++ [downsweepPhase o] ++ [⟨[], []⟩, ⟨[], []⟩] := by
+            simp [WG.gradeDownsweeps, Grade.seq, gradeDownsweep, Grade.ofBarrier,
+                  List.append_assoc]
+          exact LanguageQuantale.Word.ext (htotal_list.trans hspec_list.symm)
 
 /-- Helper: sequencing `gradeOfOffsets` over appended lists. -/
 lemma gradeOfOffsets_append {xs ys : List (Nat × Stmt)} :
@@ -1174,7 +1195,8 @@ lemma gradeOf_upsweepStmt (off : Nat) :
 
 lemma gradeOf_downsweepStmt (off : Nat) :
   gradeOf (downsweepStmt off) = gradeDownsweepIR off := by
-  simp [downsweepStmt, downsweepBody, gradeDownsweepIR, Grade.seq, gradeOf, stampGrade, wgLoc]
+  simp [downsweepStmt, downsweepBody, gradeDownsweepIR, Grade.seq, gradeOf, stampGrade,
+        wgLoc, Grade.eps]
 
 lemma gradeOfOffsets_upsweep (offs : List Nat) :
   gradeOfOffsets (offs.map (fun o => (o, upsweepStmt o))) = gradeUpsweepsIR offs := by
@@ -1278,12 +1300,18 @@ private lemma write_only_down_right_safe (off : Nat) :
 lemma gradeUpsweepIR_safe (off : Nat) :
   PhasesSafe (gradeUpsweepIR off) := by
   dsimp [gradeUpsweepIR]
-  have hread :
+  have hreadL :
       PhasesSafe
         (stampGrade (Word.ofList [⟨[asRead (wgLoc (Int.ofNat off - 1)) guardAll], []⟩])
           (upsweepGuard off)) := by
     simpa [stampGrade, stampPhase, wgLoc, asRead, wgBuf] using
       read_only_safe (wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off))
+  have hreadR :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[asRead (wgLoc (2 * Int.ofNat off - 1)) guardAll], []⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asRead, wgBuf] using
+      read_only_safe (wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off))
   have hwrite :
       PhasesSafe
         (stampGrade (Word.ofList [⟨[], [asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll]⟩])
@@ -1291,26 +1319,41 @@ lemma gradeUpsweepIR_safe (off : Nat) :
     simpa [stampGrade, stampPhase, wgLoc, asWrite, wgBuf] using
       write_only_upsweep_safe off
   have hbar := PhasesSafe.barrier
-  simpa [Grade.seq] using PhasesSafe.seq (PhasesSafe.seq hread hwrite) hbar
+  have hinner := PhasesSafe.seq (PhasesSafe.seq hreadL hreadR) hwrite
+  simpa [Grade.seq] using PhasesSafe.seq hinner hbar
 
 /-- Each downsweep IR stage is safe: two writes then a barrier. -/
 lemma gradeDownsweepIR_safe (off : Nat) :
   PhasesSafe (gradeDownsweepIR off) := by
   dsimp [gradeDownsweepIR]
-  have hl :
+  have hrR :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[asRead (wgLoc (2 * Int.ofNat off - 1)) guardAll], []⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asRead, wgBuf] using
+      read_only_safe (wgBuf "buf" (2 * Int.ofNat off - 1) (upsweepGuard off))
+  have hrL :
+      PhasesSafe
+        (stampGrade (Word.ofList [⟨[asRead (wgLoc (Int.ofNat off - 1)) guardAll], []⟩])
+          (upsweepGuard off)) := by
+    simpa [stampGrade, stampPhase, wgLoc, asRead, wgBuf] using
+      read_only_safe (wgBuf "buf" (Int.ofNat off - 1) (upsweepGuard off))
+  have hwL :
       PhasesSafe
         (stampGrade (Word.ofList [⟨[], [asWrite (wgLoc (Int.ofNat off - 1)) guardAll]⟩])
           (upsweepGuard off)) := by
     simpa [stampGrade, stampPhase, wgLoc, asWrite, wgBuf] using
       write_only_down_left_safe off
-  have hr :
+  have hwR :
       PhasesSafe
         (stampGrade (Word.ofList [⟨[], [asWrite (wgLoc (2 * Int.ofNat off - 1)) guardAll]⟩])
           (upsweepGuard off)) := by
     simpa [stampGrade, stampPhase, wgLoc, asWrite, wgBuf] using
       write_only_down_right_safe off
   have hbar := PhasesSafe.barrier
-  simpa [Grade.seq] using PhasesSafe.seq (PhasesSafe.seq hl hr) hbar
+  have hinner :=
+    PhasesSafe.seq (PhasesSafe.seq (PhasesSafe.seq hrR hrL) hwL) hwR
+  simpa [Grade.seq] using PhasesSafe.seq hinner hbar
 
 lemma gradeUpsweepsIR_safe {offs : List Nat} :
   PhasesSafe (gradeUpsweepsIR offs) := by

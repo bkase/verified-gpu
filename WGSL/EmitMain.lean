@@ -8,7 +8,7 @@ namespace WGSL
 
 /-
 Emit the certified Blelloch scan WGSL module, defaulting to
-`wgsl-harness/kernel.wgsl` but accepting an optional CLI path override.
+`wgsl-harness/.generated/kernel.wgsl` but accepting an optional CLI path override.
 The offsets correspond to a single 256-thread workgroup (`[1,2,...,128]`).
 -/
 
@@ -50,7 +50,6 @@ def certifiedText : String :=
 def wgslSource : String :=
   "/* Certified WGSL (auto-generated):\n"
   ++ certifiedText ++ "\n*/\n\n"
-  ++ certifiedText
 
 def defaultOutputPath : System.FilePath :=
   "wgsl-harness" / ".generated" / "kernel.wgsl"

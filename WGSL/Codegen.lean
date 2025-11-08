@@ -65,47 +65,6 @@ def cgExpr : Kernel.Expr → WGSL.Expr
 | .mul a b => .mul (cgExpr a) (cgExpr b)
 | .tidx    => .castI32 tidU
 
-/-- Specialized lowering for the downsweep's paired stores that refer to
-two placeholder variables `_a` and `_b`. -/
-private def expandDownsweepTwoStores? (env : Env) : Kernel.Stmt → Option WGSL.Stmt
-| Kernel.Stmt.seq (Kernel.Stmt.store locL (Kernel.Expr.var "_a"))
-                  (Kernel.Stmt.store locR (Kernel.Expr.var "_b")) =>
-    let (spaceL, nameL, idxL) := cgLoc env locL
-    let (spaceR, nameR, idxR) := cgLoc env locR
-    if spaceL = .workgroup ∧ spaceR = .workgroup ∧ nameL = nameR then
-      some <|
-        WGSL.Stmt.seq
-          (WGSL.Stmt.load nameR idxR "_a")
-          (WGSL.Stmt.seq
-            (WGSL.Stmt.load nameL idxL "_t")
-            (WGSL.Stmt.seq
-              (WGSL.Stmt.let_ "_b"
-                (WGSL.Expr.add (WGSL.Expr.var "_a") (WGSL.Expr.var "_t")))
-              (WGSL.Stmt.seq
-                (WGSL.Stmt.store nameL idxL (WGSL.Expr.var "_a"))
-                (WGSL.Stmt.store nameR idxR (WGSL.Expr.var "_b")))))
-    else
-      none
-| _ => none
-
-/-- Specialized lowering for the upsweep's "copy" pattern that should be an add. -/
-private def expandUpsweepLoadStore? (env : Env) : Kernel.Stmt → Option WGSL.Stmt
-| Kernel.Stmt.seq (Kernel.Stmt.load locL "_tmp")
-                  (Kernel.Stmt.store locR (Kernel.Expr.var "_tmp")) =>
-    let (spaceL, nameL, idxL) := cgLoc env locL
-    let (spaceR, nameR, idxR) := cgLoc env locR
-    if spaceL = .workgroup ∧ spaceR = .workgroup ∧ nameL = nameR then
-      some <|
-        WGSL.Stmt.seq
-          (WGSL.Stmt.load nameL idxL "_lhs")
-          (WGSL.Stmt.seq
-            (WGSL.Stmt.load nameR idxR "_rhs")
-            (WGSL.Stmt.store nameR idxR
-              (WGSL.Expr.add (WGSL.Expr.var "_lhs") (WGSL.Expr.var "_rhs"))))
-    else
-      none
-| _ => none
-
 partial def cgStmt (env : Env) : Kernel.Stmt → WGSL.Stmt
 | .skip => .skip
 | .let_ x e => .let_ x (cgExpr e)
@@ -119,13 +78,7 @@ partial def cgStmt (env : Env) : Kernel.Stmt → WGSL.Stmt
     let (_, name, idx) := cgLoc env loc
     .atomicAdd name idx (cgExpr rhs) dst
 | .seq s t => .seq (cgStmt env s) (cgStmt env t)
-| .ite g body =>
-    match expandDownsweepTwoStores? env body with
-    | some lowered => .iff (cgGuard g) lowered
-    | none =>
-        match expandUpsweepLoadStore? env body with
-        | some lowered => .iff (cgGuard g) lowered
-        | none => .iff (cgGuard g) (cgStmt env body)
+| .ite g body => .iff (cgGuard g) (cgStmt env body)
 | .barrier_wg => .workgroupBarrier
 | .barrier_st => .storageBarrier
 | .for_threads body => cgStmt env body
